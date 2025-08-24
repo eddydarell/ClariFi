@@ -26,6 +26,7 @@ try:
     from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
     from seasonal_analyzer import SeasonalAnalyzer
     from live_monitor import LiveStockMonitor
+    from stock_screener import StockScreener
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -1112,6 +1113,12 @@ def main():
   ./run.sh live PLTR QBTS --interval 10
   ./run.sh live AAPL --no-graphs --interval 3
 
+📊 MARKET SCREENING:
+  ./run.sh screen gainers
+  ./run.sh screen losers --limit 10
+  ./run.sh screen actives --limit 30
+  ./run.sh screen new
+
 🎯 MARKET INTELLIGENCE FEATURES:
   ✅ Correlation pattern detection
   ✅ Leading indicator identification
@@ -1126,6 +1133,7 @@ def main():
   ✅ Portfolio-level recommendations
   ✅ Deep backtesting & accuracy analysis
   ✅ Real-time live monitoring with terminal graphs
+  ✅ Market screening for gainers, losers, and new listings
 
 ⚖️ OPTIONS & RISK ANALYSIS:
   ./run.sh analyze AAPL MSFT --period 1y  # Full analysis with options
@@ -1234,6 +1242,14 @@ def main():
     live_parser.add_argument('--interval', '-i', type=int, default=5, help='Update interval in seconds (default: 5)')
     live_parser.add_argument('--no-graphs', action='store_true', help='Disable terminal graphs')
     live_parser.add_argument('--no-summary', action='store_true', help='Disable summary table')
+
+    # Stock screener command
+    screener_parser = subparsers.add_parser('screen', help='📊 Market screening for gainers, losers, and new listings')
+    screener_parser.add_argument('category', choices=['gainers', 'losers', 'actives', 'new'],
+                                help='Screening category: gainers, losers, actives, or new')
+    screener_parser.add_argument('--limit', '-l', type=int, default=20,
+                                help='Number of results to return (default: 20)')
+    screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
     # Portfolio management (grouped subcommands)
     portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, remove, tickers, analyze)')
@@ -1505,6 +1521,23 @@ def main():
                 show_graphs=not args.no_graphs,
                 show_summary=not args.no_summary
             )
+
+        elif args.command == 'screen':
+            # Initialize stock screener
+            screener = StockScreener()
+
+            print(f"🔍 Starting market screening for: {args.category}")
+            print(f"📊 Limit: {args.limit} results")
+            if args.export:
+                print(f"📁 Export to: {args.export}")
+            print()
+
+            # Perform screening
+            screener.screen_market(args.category, args.limit)
+
+            # TODO: Implement CSV export if requested
+            if args.export:
+                print(f"💾 CSV export functionality coming soon...")
 
         elif args.command == 'portfolio':
             # Ensure an action is provided
