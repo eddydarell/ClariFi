@@ -46,7 +46,8 @@ class AdvancedStockAnalysis:
     def comprehensive_analysis(self, tickers, period="1y", download=True,
                              include_patterns=True, include_events=True,
                              include_advanced_viz=True, include_options=True,
-                             include_investment_advice=True, include_seasonal=True):
+                             include_investment_advice=True, include_seasonal=True,
+                             include_deep=False, deep_chunk_months=3):
         """
         Perform comprehensive market analysis including patterns, events, options, and investment advice.
 
@@ -254,11 +255,51 @@ class AdvancedStockAnalysis:
             else:
                 print("⚠️ No seasonal patterns detected (insufficient data)")
 
+        # Step 6.8: Deep Analysis (Historical Chunk Backtesting)
+        deep_results = {}
+        if include_deep:
+            print(f"\n🔁 DEEP BACKTESTING ANALYSIS (chunk={deep_chunk_months} months)...")
+            # Import the engine for deep analysis functionality
+            try:
+                sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clarifi_engine'))
+                from engine import ClariFiEngine
+                engine = ClariFiEngine()
+
+                for ticker in tickers:
+                    if ticker in stock_data_dict:
+                        print(f"  🔍 Running deep analysis for {ticker}...")
+                        deep_result = engine._run_deep_analysis(
+                            ticker,
+                            stock_data_dict[ticker].copy(),
+                            chunk_months=deep_chunk_months
+                        )
+
+                        if deep_result and isinstance(deep_result, dict) and 'summary' in deep_result:
+                            deep_results[ticker] = deep_result
+                            summary = deep_result['summary']
+
+                            print(f"      📊 Chunks Evaluated: {summary['chunks_evaluated']}")
+                            print(f"      🎯 Price Accuracy: {summary['avg_price_accuracy']:.2%}")
+                            print(f"      📈 Direction Accuracy: {summary['avg_direction_accuracy']:.2%}")
+                            print(f"      🏆 Coefficient of Precision: {summary['coefficient_of_precision']:.3f}")
+                        else:
+                            print(f"      ⚠️ Deep analysis failed for {ticker}")
+            except ImportError as e:
+                print(f"      ❌ Could not import ClariFiEngine: {e}")
+                print("      🔧 Deep analysis requires the engine module")
+            except Exception as e:
+                print(f"      ❌ Deep analysis error: {e}")
+
+            if deep_results:
+                print("✅ Deep analysis completed!")
+            else:
+                print("⚠️ No deep analysis results generated")
+
         # Step 7: Generate Summary Report
         print("\n📋 GENERATING ANALYSIS SUMMARY...")
         self._generate_summary_report(tickers, correlation_results, volatility_results,
                                     trend_results, event_results, unusual_movements,
-                                    options_results, portfolio_advice, seasonal_results)
+                                    options_results, portfolio_advice, seasonal_results, deep_results)
 
         print("\n🎉 === COMPREHENSIVE ANALYSIS COMPLETED === 🎉")
         print(f"📁 Data files: {self.downloader.data_dir}/")
@@ -388,7 +429,7 @@ class AdvancedStockAnalysis:
 
     def _generate_summary_report(self, tickers, correlation_results, volatility_results,
                                trend_results, event_results, unusual_movements,
-                               options_results=None, portfolio_advice=None, seasonal_results=None):
+                               options_results=None, portfolio_advice=None, seasonal_results=None, deep_results=None):
         """Generate a comprehensive text summary of all analyses."""
 
         print("\n" + "="*80)
@@ -533,6 +574,22 @@ class AdvancedStockAnalysis:
                 else:
                     print(f"      ➡️ Current timing: NEUTRAL ({current_month})")
 
+        # Deep Analysis Summary (Historical Backtesting)
+        if deep_results:
+            print(f"\n🔁 DEEP BACKTESTING ANALYSIS:")
+            for ticker, deep_data in deep_results.items():
+                if 'summary' in deep_data:
+                    summary = deep_data['summary']
+                    precision_emoji = "🏆" if summary['coefficient_of_precision'] > 0.7 else \
+                                    "👍" if summary['coefficient_of_precision'] > 0.5 else \
+                                    "🤔" if summary['coefficient_of_precision'] > 0.3 else "⚠️"
+
+                    print(f"  {precision_emoji} {ticker}: Coefficient of Precision: {summary['coefficient_of_precision']:.3f}")
+                    print(f"      📊 Evaluated {summary['chunks_evaluated']} periods of {summary['chunk_months']} months each")
+                    print(f"      🎯 Price Accuracy: {summary['avg_price_accuracy']:.1%}")
+                    print(f"      📈 Direction Accuracy: {summary['avg_direction_accuracy']:.1%}")
+                    print(f"      📅 Period: {summary['period_start'][:10]} to {summary['period_end'][:10]}")
+
         print("\n" + "="*80)
         print("💡 INVESTMENT INSIGHTS:")
 
@@ -596,6 +653,18 @@ class AdvancedStockAnalysis:
                              if data.bias_score > 0.5]
             if strong_seasonal:
                 insights.append(f"🗓️ Strong seasonal patterns: {', '.join(strong_seasonal)}")
+
+        # Add deep analysis insights
+        if deep_results:
+            high_precision_stocks = [ticker for ticker, data in deep_results.items()
+                                   if 'summary' in data and data['summary']['coefficient_of_precision'] > 0.7]
+            if high_precision_stocks:
+                insights.append(f"🏆 High prediction accuracy: {', '.join(high_precision_stocks)}")
+
+            low_precision_stocks = [ticker for ticker, data in deep_results.items()
+                                  if 'summary' in data and data['summary']['coefficient_of_precision'] < 0.3]
+            if low_precision_stocks:
+                insights.append(f"⚠️ Low prediction accuracy (high uncertainty): {', '.join(low_precision_stocks)}")
 
         if insights:
             for insight in insights:
@@ -697,6 +766,7 @@ def main():
 🔬 COMPREHENSIVE ANALYSIS (Advanced):
   ./run.sh analyze PLTR QBTS AAPL --period 1y
   ./run.sh analyze "SAAB B" NANEXA --period 6mo --no-events
+  ./run.sh analyze AAPL --include-deep --deep-chunk-months 6
 
 📈 PATTERN ANALYSIS:
   ./run.sh patterns AAPL MSFT GOOGL --period 2y
@@ -760,6 +830,8 @@ def main():
     analyze_parser.add_argument('--no-options', action='store_true', help='Skip Black-Scholes options analysis')
     analyze_parser.add_argument('--no-investment-advice', action='store_true', help='Skip investment suggestions')
     analyze_parser.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
+    analyze_parser.add_argument('--include-deep', action='store_true', help='🔁 Enable deep backtesting analysis')
+    analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Deep analysis chunk size in months (default: 3)')
 
     # Seasonal analysis
     seasonal_parser = subparsers.add_parser('seasonal', help='🗓️ Seasonal & holiday analysis')
@@ -851,7 +923,9 @@ def main():
                 include_advanced_viz=not args.no_advanced_viz,
                 include_options=not args.no_options,
                 include_investment_advice=not args.no_investment_advice,
-                include_seasonal=not args.no_seasonal
+                include_seasonal=not args.no_seasonal,
+                include_deep=args.include_deep,
+                deep_chunk_months=args.deep_chunk_months
             )
 
         elif args.command == 'seasonal':

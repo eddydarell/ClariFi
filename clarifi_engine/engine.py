@@ -192,7 +192,8 @@ class ClariFiEngine:
     def comprehensive_analysis(self, tickers: List[str], portfolio_id: str = None,
                              period: str = "1y", save_to_db: bool = True,
                              include_patterns: bool = True, include_events: bool = True,
-                             include_options: bool = True, include_seasonal: bool = True) -> Dict[str, Any]:
+                             include_options: bool = True, include_seasonal: bool = True,
+                             include_deep: bool = False, deep_chunk_months: int = 3) -> Dict[str, Any]:
         """Perform comprehensive analysis on tickers"""
 
         command_id = self.log_command("comprehensive_analysis", {
@@ -202,7 +203,9 @@ class ClariFiEngine:
             "include_patterns": include_patterns,
             "include_events": include_events,
             "include_options": include_options,
-            "include_seasonal": include_seasonal
+            "include_seasonal": include_seasonal,
+            "include_deep": include_deep,
+            "deep_chunk_months": deep_chunk_months
         })
 
         start_time = time.time()
@@ -281,6 +284,24 @@ class ClariFiEngine:
                         ticker_results["seasonal"] = seasonal_data
                     except Exception as e:
                         ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
+
+                # Deep (historical chunk) Analysis / Backtesting
+                if include_deep:
+                    print(f"🔁 Running deep backtesting analysis for {ticker} (chunk={deep_chunk_months}mo)...")
+                    try:
+                        deep_result = self._run_deep_analysis(
+                            ticker,
+                            stock_data.copy(),
+                            chunk_months=deep_chunk_months
+                        )
+                        ticker_results["deep_analysis"] = deep_result
+                        # Attach coefficient of precision at top-level
+                        if deep_result and isinstance(deep_result, dict):
+                            summary = deep_result.get("summary", {})
+                            if "coefficient_of_precision" in summary:
+                                ticker_results["coefficient_of_precision"] = summary["coefficient_of_precision"]
+                    except Exception as e:
+                        ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
 
                 # Generate overall recommendation
                 recommendation, confidence, risk_level = self._generate_overall_recommendation(ticker_results)
@@ -489,6 +510,160 @@ class ClariFiEngine:
 
         return metrics
 
+    # ------------------------------------------------------------------
+    # Deep Analysis / Historical Chunk Backtesting
+    # ------------------------------------------------------------------
+    def _run_deep_analysis(self, ticker: str, full_data: pd.DataFrame, chunk_months: int = 3) -> Dict[str, Any]:
+        """
+        Perform rolling historical backtest to evaluate predictive indicators accuracy.
+
+        Process:
+          1. Use the full dataset (assumed already limited to desired period, e.g. 5y).
+          2. Walk forward in fixed month chunks. For each chunk end date T:
+             - Use data up to T (inclusive) as if "current".
+             - Derive simple predictions from available analyses logic (trend direction, next-period drift estimate).
+             - Compare with actual price at T + next chunk (or dataset end) to measure accuracy.
+          3. Aggregate metrics into coefficient of precision.
+
+        Returns dict containing per-chunk records and summary statistics.
+        """
+        if full_data is None or full_data.empty:
+            return {"error": "No data provided for deep analysis"}
+
+        # Ensure chronological order
+        data = full_data.sort_index().copy()
+
+        # Expect a DateTimeIndex; if not, try to convert
+        if not isinstance(data.index, pd.DatetimeIndex):
+            # Attempt to parse an index column
+            if 'Date' in data.columns:
+                data['Date'] = pd.to_datetime(data['Date'])
+                data = data.set_index('Date')
+            else:
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    return {"error": "Data does not have a valid datetime index"}
+
+        # Basic price column selection
+        price_col = 'Close' if 'Close' in data.columns else data.columns[0]
+
+        # Determine rolling chunk boundaries
+        start_date = data.index.min()
+        end_date = data.index.max()
+        if pd.isna(start_date) or pd.isna(end_date):
+            return {"error": "Invalid date range in data"}
+
+        chunk_results = []
+        current_start = start_date
+
+        # Helper for month increment
+        def add_months(dt: pd.Timestamp, months: int) -> pd.Timestamp:
+            year = dt.year + (dt.month - 1 + months) // 12
+            month = (dt.month - 1 + months) % 12 + 1
+            day = min(dt.day, [31,
+                               29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                               31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+            return pd.Timestamp(year=year, month=month, day=day)
+
+        # Minimal length guard (need at least two chunks)
+        if add_months(start_date, chunk_months * 2) > end_date:
+            return {"error": "Not enough data for deep analysis with given chunk size"}
+
+        while True:
+            chunk_end = add_months(current_start, chunk_months)
+            if chunk_end >= end_date:
+                break  # Need future data for evaluation
+
+            in_sample = data.loc[(data.index >= current_start) & (data.index < chunk_end)]
+            if in_sample.empty:
+                current_start = chunk_end
+                continue
+
+            # Compute simple predictive indicators
+            # Trend: linear regression slope on prices inside sample
+            try:
+                closes = in_sample[price_col]
+                x = np.arange(len(closes))
+                slope = 0.0
+                direction = 'FLAT'
+                if len(closes) > 1:
+                    slope = np.polyfit(x, closes.values, 1)[0]
+                    direction = 'BULLISH' if slope > 0 else 'BEARISH' if slope < 0 else 'FLAT'
+                recent_return = (closes.iloc[-1] / closes.iloc[0] - 1) if len(closes) > 1 else 0.0
+                # Simple projection: assume continuation of average daily return over next chunk
+                avg_daily_ret = closes.pct_change().mean()
+                future_period_days = max(1, int((add_months(chunk_end, chunk_months) - chunk_end).days))
+                projected_change = (1 + avg_daily_ret) ** future_period_days - 1 if avg_daily_ret is not None else 0.0
+            except Exception as e:
+                chunk_results.append({
+                    "chunk_start": current_start.isoformat(),
+                    "chunk_end": chunk_end.isoformat(),
+                    "error": f"Indicator calculation failed: {str(e)}"
+                })
+                current_start = chunk_end
+                continue
+
+            # Actual future window for evaluation
+            future_start = chunk_end
+            future_end = add_months(chunk_end, chunk_months)
+            future_window = data.loc[(data.index >= future_start) & (data.index < future_end)]
+            if future_window.empty:
+                break  # No future data left
+
+            actual_future_price = future_window[price_col].iloc[-1]
+            reference_price = closes.iloc[-1]
+            actual_change = (actual_future_price / reference_price - 1) if reference_price else 0.0
+            actual_direction = 'BULLISH' if actual_change > 0 else 'BEARISH' if actual_change < 0 else 'FLAT'
+
+            # Metrics
+            price_change_error = abs(projected_change - actual_change)
+            # Convert to accuracy (1 - normalized error). Use a soft normalization factor.
+            norm_factor = max(0.0001, abs(actual_change) + 0.02)
+            price_accuracy = max(0.0, 1 - price_change_error / norm_factor)
+            direction_accuracy = 1.0 if direction == actual_direction else 0.0
+
+            chunk_results.append({
+                "chunk_start": current_start.isoformat(),
+                "chunk_end": chunk_end.isoformat(),
+                "evaluation_end": future_end.isoformat(),
+                "predicted_direction": direction,
+                "actual_direction": actual_direction,
+                "direction_accuracy": direction_accuracy,
+                "predicted_change_pct": projected_change * 100,
+                "actual_change_pct": actual_change * 100,
+                "price_accuracy": price_accuracy,
+                "slope": slope,
+                "recent_return_pct": recent_return * 100
+            })
+
+            current_start = chunk_end
+
+        if not chunk_results:
+            return {"error": "No chunk results produced"}
+
+        # Aggregate summary
+        df_chunks = pd.DataFrame(chunk_results)
+        coefficient_of_precision = float(
+            0.6 * df_chunks['price_accuracy'].mean() +
+            0.4 * df_chunks['direction_accuracy'].mean()
+        )
+        summary = {
+            "chunks_evaluated": int(len(df_chunks)),
+            "avg_price_accuracy": float(df_chunks['price_accuracy'].mean()),
+            "avg_direction_accuracy": float(df_chunks['direction_accuracy'].mean()),
+            "coefficient_of_precision": coefficient_of_precision,
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "chunk_months": chunk_months
+        }
+
+        return {
+            "ticker": ticker,
+            "summary": summary,
+            "chunks": chunk_results
+        }
+
     def get_accuracy_trends(self, ticker: str = None, portfolio_id: str = None) -> Dict[str, Any]:
         """Get accuracy trends for model refinement"""
         return self.comparison_model.get_accuracy_trends(ticker, portfolio_id)
@@ -512,3 +687,18 @@ class ClariFiEngine:
             portfolio_id=portfolio_id,
             period=period
         )
+
+    def deep_comprehensive_analysis(self, tickers: List[str], period: str = "5y",
+                                    chunk_months: int = 3, **kwargs) -> Dict[str, Any]:
+        """
+        Convenience wrapper to run comprehensive analysis with deep backtesting enabled.
+
+        Args:
+            tickers (List[str]): Tickers to analyze
+            period (str): Overall historical period (e.g. '5y')
+            chunk_months (int): Size of rolling evaluation chunk
+            **kwargs: Other flags forwarded to comprehensive_analysis
+        """
+        kwargs.setdefault('include_deep', True)
+        kwargs.setdefault('deep_chunk_months', chunk_months)
+        return self.comprehensive_analysis(tickers=tickers, period=period, **kwargs)

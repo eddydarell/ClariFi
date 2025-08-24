@@ -60,18 +60,13 @@ class AdvancedStockAnalysis:
             include_advanced_viz (bool): Whether to create advanced visualizations
             include_options (bool): Whether to include Black-Scholes options analysis
             include_investment_advice (bool): Whether to generate investment suggestions
-            include_seasonal (bool): Whether to include seasonal analysis
-            include_deep (bool): Whether to include deep backtesting analysis
-            deep_chunk_months (int): Chunk size in months for deep analysis
         """
         print(f"🚀 ClariFi: Clarify your Finances")
         print("=======================")
         print(f"🚀 === COMPREHENSIVE MARKET ANALYSIS === 🚀")
         print(f"Tickers: {', '.join(tickers)}")
         print(f"Period: {period}")
-        print(f"Analysis Features: Patterns={include_patterns}, Events={include_events}, Advanced Viz={include_advanced_viz}, Options={include_options}, Investment Advice={include_investment_advice}, Seasonal={include_seasonal}, Deep={include_deep}")
-        if include_deep:
-            print(f"Deep Analysis: Chunk size = {deep_chunk_months} months")
+        print(f"Analysis Features: Patterns={include_patterns}, Events={include_events}, Advanced Viz={include_advanced_viz}, Options={include_options}, Investment Advice={include_investment_advice}")
         print("=" * 60)
 
         # Step 1: Download data
@@ -247,11 +242,11 @@ class AdvancedStockAnalysis:
                         seasonal_results[ticker] = seasonal_result
 
                         # Display key seasonal insights
-                        print(f"      🌟 Recommendation: {seasonal_result['recommendation']}")
-                        print(f"      📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
-                        print(f"      📈 Best Months: {', '.join(seasonal_result['best_months'])}")
-                        print(f"      📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
-                        print(f"      💡 Pattern: {seasonal_result['seasonal_summary']}")
+                        print(f"      🌟 Recommendation: {seasonal_result.recommendation}")
+                        print(f"      📊 Seasonal Bias Score: {seasonal_result.bias_score:.2f}")
+                        print(f"      📈 Best Months: {', '.join(seasonal_result.best_months)}")
+                        print(f"      📉 Worst Months: {', '.join(seasonal_result.worst_months)}")
+                        print(f"      💡 Pattern: {seasonal_result.seasonal_summary}")
                     else:
                         print(f"      ⚠️ Insufficient data for seasonal analysis")
 
@@ -260,49 +255,45 @@ class AdvancedStockAnalysis:
             else:
                 print("⚠️ No seasonal patterns detected (insufficient data)")
 
-        # Step 6.6: Deep Analysis (Historical Backtesting)
+        # Step 6.8: Deep Analysis (Historical Chunk Backtesting)
         deep_results = {}
         if include_deep:
-            print("\n🔁 DEEP BACKTESTING ANALYSIS...")
-            print(f"   Chunk size: {deep_chunk_months} months")
-
+            print(f"\n🔁 DEEP BACKTESTING ANALYSIS (chunk={deep_chunk_months} months)...")
             # Import the engine for deep analysis functionality
             try:
+                sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clarifi_engine'))
                 from engine import ClariFiEngine
                 engine = ClariFiEngine()
-
+                
                 for ticker in tickers:
                     if ticker in stock_data_dict:
                         print(f"  🔍 Running deep analysis for {ticker}...")
-                        try:
-                            deep_result = engine._run_deep_analysis(
-                                ticker,
-                                stock_data_dict[ticker].copy(),
-                                chunk_months=deep_chunk_months
-                            )
-                            if deep_result and not deep_result.get('error'):
-                                deep_results[ticker] = deep_result
-                                summary = deep_result.get('summary', {})
-                                precision = summary.get('coefficient_of_precision', 0)
-                                chunks_eval = summary.get('chunks_evaluated', 0)
-                                print(f"    ✓ Precision coefficient: {precision:.2%}")
-                                print(f"    📊 Evaluated {chunks_eval} chunks")
-                            else:
-                                error_msg = deep_result.get('error', 'Unknown error') if deep_result else 'Failed to execute'
-                                print(f"    ❌ Deep analysis failed: {error_msg}")
-                        except Exception as e:
-                            print(f"    ❌ Deep analysis error for {ticker}: {str(e)}")
-                    else:
-                        print(f"    ⚠️ No data available for {ticker}")
-
-                if deep_results:
-                    print("✅ Deep analysis completed!")
-                else:
-                    print("⚠️ No deep analysis results generated")
-
+                        deep_result = engine._run_deep_analysis(
+                            ticker,
+                            stock_data_dict[ticker].copy(),
+                            chunk_months=deep_chunk_months
+                        )
+                        
+                        if deep_result and isinstance(deep_result, dict) and 'summary' in deep_result:
+                            deep_results[ticker] = deep_result
+                            summary = deep_result['summary']
+                            
+                            print(f"      📊 Chunks Evaluated: {summary['chunks_evaluated']}")
+                            print(f"      🎯 Price Accuracy: {summary['avg_price_accuracy']:.2%}")
+                            print(f"      📈 Direction Accuracy: {summary['avg_direction_accuracy']:.2%}")
+                            print(f"      🏆 Coefficient of Precision: {summary['coefficient_of_precision']:.3f}")
+                        else:
+                            print(f"      ⚠️ Deep analysis failed for {ticker}")
             except ImportError as e:
-                print(f"    ❌ Could not import engine for deep analysis: {e}")
-                print("    💡 Deep analysis requires the ClariFiEngine module")
+                print(f"      ❌ Could not import ClariFiEngine: {e}")
+                print("      🔧 Deep analysis requires the engine module")
+            except Exception as e:
+                print(f"      ❌ Deep analysis error: {e}")
+                
+            if deep_results:
+                print("✅ Deep analysis completed!")
+            else:
+                print("⚠️ No deep analysis results generated")
 
         # Step 7: Generate Summary Report
         print("\n📋 GENERATING ANALYSIS SUMMARY...")
@@ -445,11 +436,8 @@ class AdvancedStockAnalysis:
         print("📊 MARKET ANALYSIS SUMMARY REPORT")
         print("="*80)
 
-        # Enhanced Ticker Summary with Recommendations and Accuracy
-        print(f"\n🎯 ANALYZED TICKERS WITH RECOMMENDATIONS:")
-        self._display_enhanced_ticker_summary(tickers, portfolio_advice, deep_results)
-
-        print(f"\n📅 Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"\n🎯 ANALYZED TICKERS: {', '.join(tickers)}")
+        print(f"📅 Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Trend Analysis Summary
         if trend_results:
@@ -565,72 +553,42 @@ class AdvancedStockAnalysis:
         if seasonal_results:
             print(f"\n🗓️ SEASONAL PATTERNS:")
             for ticker, seasonal_data in seasonal_results.items():
-                seasonal_emoji = "🌟" if "FAVORABLE" in seasonal_data['recommendation'] else \
-                               "⚠️" if "UNFAVORABLE" in seasonal_data['recommendation'] else "🔄"
+                seasonal_emoji = "🌟" if "FAVORABLE" in seasonal_data.recommendation else \
+                               "⚠️" if "UNFAVORABLE" in seasonal_data.recommendation else "🔄"
 
-                bias_desc = "Strong" if seasonal_data['bias_score'] > 0.5 else \
-                           "Moderate" if seasonal_data['bias_score'] > 0.2 else "Weak"
+                bias_desc = "Strong" if seasonal_data.bias_score > 0.5 else \
+                           "Moderate" if seasonal_data.bias_score > 0.2 else "Weak"
 
                 print(f"  {seasonal_emoji} {ticker}: {bias_desc} seasonal bias "
-                      f"(Score: {seasonal_data['bias_score']:.2f})")
-                print(f"      📈 Strong months: {', '.join(seasonal_data['best_months'])}")
-                print(f"      📉 Weak months: {', '.join(seasonal_data['worst_months'])}")
-                print(f"      💡 Pattern: {seasonal_data['seasonal_summary']}")
+                      f"(Score: {seasonal_data.bias_score:.2f})")
+                print(f"      📈 Strong months: {', '.join(seasonal_data.best_months)}")
+                print(f"      📉 Weak months: {', '.join(seasonal_data.worst_months)}")
+                print(f"      💡 Pattern: {seasonal_data.seasonal_summary}")
 
                 # Current month context
                 current_month = calendar.month_name[datetime.now().month]
-                if current_month in seasonal_data['best_months']:
+                if current_month in seasonal_data.best_months:
                     print(f"      🎯 Current timing: FAVORABLE ({current_month})")
-                elif current_month in seasonal_data['worst_months']:
+                elif current_month in seasonal_data.worst_months:
                     print(f"      ⏰ Current timing: UNFAVORABLE ({current_month})")
                 else:
                     print(f"      ➡️ Current timing: NEUTRAL ({current_month})")
 
-        # Deep Analysis Summary
+        # Deep Analysis Summary (Historical Backtesting)
         if deep_results:
-            print(f"\n🔁 BACKTESTING ACCURACY:")
-
-            # Create table header
-            print("┌─────────────┬─────────────┬─────────────┬─────────────┬───────────────┐")
-            print("│ Ticker      │ Precision   │ Price Acc   │ Direction   │ Chunks Eval   │")
-            print("├─────────────┼─────────────┼─────────────┼─────────────┼───────────────┤")
-
-            overall_precision = []
+            print(f"\n🔁 DEEP BACKTESTING ANALYSIS:")
             for ticker, deep_data in deep_results.items():
-                summary = deep_data.get('summary', {})
-                precision = summary.get('coefficient_of_precision', 0)
-                overall_precision.append(precision)
-                chunks_count = summary.get('chunks_evaluated', 0)
-                avg_price_acc = summary.get('avg_price_accuracy', 0)
-                avg_dir_acc = summary.get('avg_direction_accuracy', 0)
-
-                # Format with emojis based on accuracy
-                precision_emoji = "🎯" if precision > 0.7 else "📊" if precision > 0.5 else "📉"
-
-                # Format table fields
-                ticker_display = f"{precision_emoji} {ticker}"[:11]
-                precision_display = f"{precision:.1%}"[:11]
-                price_display = f"{avg_price_acc:.1%}"[:11]
-                direction_display = f"{avg_dir_acc:.1%}"[:11]
-                chunks_display = f"{chunks_count}"[:13]
-
-                print(f"│ {ticker_display:11} │ {precision_display:11} │ {price_display:11} │ {direction_display:11} │ {chunks_display:13} │")
-
-            print("└─────────────┴─────────────┴─────────────┴─────────────┴───────────────┘")
-
-            if overall_precision:
-                avg_precision = sum(overall_precision) / len(overall_precision)
-                confidence_emoji = "✅" if avg_precision > 0.7 else "⚠️" if avg_precision > 0.5 else "🚨"
-                confidence_desc = "High" if avg_precision > 0.7 else "Moderate" if avg_precision > 0.5 else "Low"
-
-                print(f"\n  📊 Portfolio Average Precision: {confidence_emoji} {avg_precision:.1%} ({confidence_desc} confidence)")
-
-                if avg_precision > 0.7:
-                    print(f"      ✅ High confidence in analysis accuracy - Recommendations are reliable")
-                elif avg_precision > 0.5:
-                    print(f"      ⚠️ Moderate confidence - Consider additional factors before investing")
-                else:
-                    print(f"      🚨 Low confidence - Use caution with recommendations, seek more data")
+                if 'summary' in deep_data:
+                    summary = deep_data['summary']
+                    precision_emoji = "🏆" if summary['coefficient_of_precision'] > 0.7 else \
+                                    "👍" if summary['coefficient_of_precision'] > 0.5 else \
+                                    "🤔" if summary['coefficient_of_precision'] > 0.3 else "⚠️"
+                    
+                    print(f"  {precision_emoji} {ticker}: Coefficient of Precision: {summary['coefficient_of_precision']:.3f}")
+                    print(f"      📊 Evaluated {summary['chunks_evaluated']} periods of {summary['chunk_months']} months each")
+                    print(f"      🎯 Price Accuracy: {summary['avg_price_accuracy']:.1%}")
+                    print(f"      📈 Direction Accuracy: {summary['avg_direction_accuracy']:.1%}")
+                    print(f"      📅 Period: {summary['period_start'][:10]} to {summary['period_end'][:10]}")
 
         print("\n" + "="*80)
         print("💡 INVESTMENT INSIGHTS:")
@@ -681,9 +639,9 @@ class AdvancedStockAnalysis:
         if seasonal_results:
             current_month = calendar.month_name[datetime.now().month]
             favorable_seasonal = [ticker for ticker, data in seasonal_results.items()
-                                 if current_month in data['best_months']]
+                                 if current_month in data.best_months]
             unfavorable_seasonal = [ticker for ticker, data in seasonal_results.items()
-                                   if current_month in data['worst_months']]
+                                   if current_month in data.worst_months]
 
             if favorable_seasonal:
                 insights.append(f"🌟 Seasonal tailwinds this month: {', '.join(favorable_seasonal)}")
@@ -692,33 +650,21 @@ class AdvancedStockAnalysis:
 
             # High seasonal bias stocks
             strong_seasonal = [ticker for ticker, data in seasonal_results.items()
-                             if data['bias_score'] > 0.5]
+                             if data.bias_score > 0.5]
             if strong_seasonal:
                 insights.append(f"🗓️ Strong seasonal patterns: {', '.join(strong_seasonal)}")
 
         # Add deep analysis insights
         if deep_results:
             high_precision_stocks = [ticker for ticker, data in deep_results.items()
-                                   if data.get('summary', {}).get('coefficient_of_precision', 0) > 0.7]
-            low_precision_stocks = [ticker for ticker, data in deep_results.items()
-                                  if data.get('summary', {}).get('coefficient_of_precision', 0) < 0.5]
-
+                                   if 'summary' in data and data['summary']['coefficient_of_precision'] > 0.7]
             if high_precision_stocks:
-                insights.append(f"🎯 High prediction accuracy: {', '.join(high_precision_stocks)} "
-                              f"(reliable analysis)")
+                insights.append(f"🏆 High prediction accuracy: {', '.join(high_precision_stocks)}")
+            
+            low_precision_stocks = [ticker for ticker, data in deep_results.items()
+                                  if 'summary' in data and data['summary']['coefficient_of_precision'] < 0.3]
             if low_precision_stocks:
-                insights.append(f"⚠️ Low prediction accuracy: {', '.join(low_precision_stocks)} "
-                              f"(use caution)")
-
-            # Overall precision insight
-            overall_precision = [data.get('summary', {}).get('coefficient_of_precision', 0)
-                               for data in deep_results.values()]
-            if overall_precision:
-                avg_precision = sum(overall_precision) / len(overall_precision)
-                if avg_precision > 0.7:
-                    insights.append("✅ Portfolio analysis shows high accuracy - confident recommendations")
-                elif avg_precision < 0.5:
-                    insights.append("🚨 Portfolio analysis shows low accuracy - proceed with caution")
+                insights.append(f"⚠️ Low prediction accuracy (high uncertainty): {', '.join(low_precision_stocks)}")
 
         if insights:
             for insight in insights:
@@ -726,177 +672,7 @@ class AdvancedStockAnalysis:
         else:
             print("  📊 Mixed signals - consider waiting for clearer trends")
 
-        # Add highlighted opportunities and risks
-        if portfolio_advice or deep_results:
-            self._display_highlighted_opportunities(portfolio_advice, deep_results)
-
         print("="*80)
-
-    def _display_enhanced_ticker_summary(self, tickers, portfolio_advice=None, deep_results=None):
-        """Display enhanced ticker summary with recommendations and accuracy highlighting."""
-
-        # Create a comprehensive summary for each ticker
-        ticker_summaries = {}
-
-        for ticker in tickers:
-            summary = {
-                'recommendation': 'HOLD',
-                'confidence': 'UNKNOWN',
-                'precision': None,
-                'risk_level': 'UNKNOWN'
-            }
-
-            # Extract recommendation from portfolio advice
-            if portfolio_advice and 'individual_suggestions' in portfolio_advice:
-                suggestion = portfolio_advice['individual_suggestions'].get(ticker, {})
-                summary['recommendation'] = suggestion.get('suggestion', 'HOLD')
-                summary['confidence'] = suggestion.get('confidence', 'UNKNOWN')
-                summary['risk_level'] = suggestion.get('risk_level', 'UNKNOWN')
-
-            # Extract precision from deep results
-            if deep_results and ticker in deep_results:
-                deep_data = deep_results[ticker]
-                summary_data = deep_data.get('summary', {})
-                summary['precision'] = summary_data.get('coefficient_of_precision', None)
-
-            ticker_summaries[ticker] = summary
-
-        # Display table header
-        print("┌─────────────┬─────────────┬─────────────┬─────────────┬─────────────────┐")
-        print("│ Ticker      │ Recommend.  │ Confidence  │ Risk Level  │ Accuracy        │")
-        print("├─────────────┼─────────────┼─────────────┼─────────────┼─────────────────┤")
-
-        # Display each ticker with appropriate highlighting
-        for ticker, summary in ticker_summaries.items():
-            # Get recommendation emoji and formatting
-            rec = summary['recommendation']
-            confidence = summary['confidence']
-            risk = summary['risk_level']
-            precision = summary['precision']
-
-            # Choose emoji based on recommendation and precision
-            if rec == 'BUY':
-                if precision and precision > 0.7:
-                    emoji = "🟢💎"  # High confidence buy
-                elif precision and precision > 0.5:
-                    emoji = "🟢📊"  # Moderate confidence buy
-                elif precision and precision < 0.5:
-                    emoji = "🟡⚠️ "  # Low confidence buy
-                else:
-                    emoji = "🟢  "  # Buy without precision data
-            elif rec == 'SELL':
-                if precision and precision > 0.7:
-                    emoji = "🔴💎"  # High confidence sell
-                elif precision and precision > 0.5:
-                    emoji = "🔴📊"  # Moderate confidence sell
-                elif precision and precision < 0.5:
-                    emoji = "🟡⚠️ "  # Low confidence sell
-                else:
-                    emoji = "🔴  "  # Sell without precision data
-            else:  # HOLD
-                if precision and precision > 0.7:
-                    emoji = "🟡💎"  # High confidence hold
-                elif precision and precision > 0.5:
-                    emoji = "🟡📊"  # Moderate confidence hold
-                elif precision and precision < 0.5:
-                    emoji = "⚪⚠️ "  # Low confidence hold
-                else:
-                    emoji = "🟡  "  # Hold without precision data
-
-            # Format precision display
-            if precision is not None:
-                precision_str = f"{precision:.1%}"
-                if precision > 0.7:
-                    precision_display = f"🎯 {precision_str}"
-                elif precision > 0.5:
-                    precision_display = f"📊 {precision_str}"
-                else:
-                    precision_display = f"⚠️  {precision_str}"
-            else:
-                precision_display = "N/A"
-
-            # Format fields to fit table
-            ticker_display = f"{emoji} {ticker}"[:11]
-            rec_display = rec[:11]
-            conf_display = confidence[:11]
-            risk_display = risk[:11]
-            precision_display = precision_display[:15]
-
-            print(f"│ {ticker_display:11} │ {rec_display:11} │ {conf_display:11} │ {risk_display:11} │ {precision_display:15} │")
-
-        print("└─────────────┴─────────────┴─────────────┴─────────────┴─────────────────┘")
-
-        # Legend
-        print("\n📋 LEGEND:")
-        print("   🟢💎 High-confidence BUY (>70% accuracy)    🔴💎 High-confidence SELL (>70% accuracy)")
-        print("   🟢📊 Moderate BUY (50-70% accuracy)        🔴📊 Moderate SELL (50-70% accuracy)")
-        print("   🟡💎 High-confidence HOLD (>70% accuracy)   ⚠️  Low accuracy (<50%) - Use caution")
-        print("   🟡📊 Moderate HOLD (50-70% accuracy)       🎯  High prediction accuracy")
-
-    def _display_highlighted_opportunities(self, portfolio_advice=None, deep_results=None):
-        """Display highlighted investment opportunities and risks based on combined analysis."""
-
-        best_opportunities = []
-        high_risks = []
-        moderate_opportunities = []
-
-        # Analyze each ticker's combined score
-        if portfolio_advice and 'individual_suggestions' in portfolio_advice:
-            for ticker, suggestion in portfolio_advice['individual_suggestions'].items():
-                rec = suggestion.get('suggestion', 'HOLD')
-                confidence = suggestion.get('confidence', 'UNKNOWN')
-
-                # Get precision if available
-                precision = None
-                if deep_results and ticker in deep_results:
-                    deep_data = deep_results[ticker]
-                    summary_data = deep_data.get('summary', {})
-                    precision = summary_data.get('coefficient_of_precision', None)
-
-                # Categorize based on recommendation, confidence, and precision
-                if rec == 'BUY':
-                    if confidence in ['HIGH', 'MEDIUM'] and precision and precision > 0.7:
-                        best_opportunities.append((ticker, 'HIGH-CONFIDENCE BUY', precision))
-                    elif confidence in ['HIGH', 'MEDIUM'] and (not precision or precision > 0.5):
-                        moderate_opportunities.append((ticker, 'MODERATE BUY', precision))
-                    elif precision and precision < 0.5:
-                        high_risks.append((ticker, 'LOW-ACCURACY BUY', precision))
-
-                elif rec == 'SELL':
-                    if confidence in ['HIGH', 'MEDIUM'] and precision and precision > 0.7:
-                        high_risks.append((ticker, 'HIGH-CONFIDENCE SELL', precision))
-                    elif precision and precision < 0.5:
-                        high_risks.append((ticker, 'LOW-ACCURACY SELL', precision))
-
-        # Display results
-        if best_opportunities or moderate_opportunities or high_risks:
-            print(f"\n🎯 KEY HIGHLIGHTS:")
-
-            if best_opportunities:
-                print(f"\n  💎 TOP OPPORTUNITIES (High confidence + High accuracy):")
-                for ticker, reason, precision in best_opportunities:
-                    precision_str = f" ({precision:.1%} accuracy)" if precision else ""
-                    print(f"     🟢💎 {ticker}: {reason}{precision_str}")
-
-            if moderate_opportunities:
-                print(f"\n  📊 MODERATE OPPORTUNITIES:")
-                for ticker, reason, precision in moderate_opportunities:
-                    precision_str = f" ({precision:.1%} accuracy)" if precision else ""
-                    print(f"     🟢📊 {ticker}: {reason}{precision_str}")
-
-            if high_risks:
-                print(f"\n  ⚠️  HIGH ATTENTION REQUIRED:")
-                for ticker, reason, precision in high_risks:
-                    precision_str = f" ({precision:.1%} accuracy)" if precision else ""
-                    print(f"     🔴⚠️  {ticker}: {reason}{precision_str}")
-
-            print(f"\n  💡 Investment Strategy:")
-            if best_opportunities:
-                print(f"     ✅ Prioritize: {', '.join([t[0] for t in best_opportunities])}")
-            if high_risks:
-                print(f"     ⚠️  Exercise caution: {', '.join([t[0] for t in high_risks])}")
-            if not best_opportunities and not high_risks:
-                print(f"     📊 Consider market timing and additional research")
 
 
 # Legacy class for backward compatibility
@@ -990,10 +766,7 @@ def main():
 🔬 COMPREHENSIVE ANALYSIS (Advanced):
   ./run.sh analyze PLTR QBTS AAPL --period 1y
   ./run.sh analyze "SAAB B" NANEXA --period 6mo --no-events
-
-🔁 DEEP BACKTESTING ANALYSIS:
-  ./run.sh analyze AAPL MSFT --period 5y --include-deep
-  ./run.sh analyze PLTR --period 3y --include-deep --deep-chunk-months 6
+  ./run.sh analyze AAPL --include-deep --deep-chunk-months 6
 
 📈 PATTERN ANALYSIS:
   ./run.sh patterns AAPL MSFT GOOGL --period 2y
@@ -1024,7 +797,6 @@ def main():
   ✅ Risk assessment and prediction
   ✅ Investment suggestion engine
   ✅ Portfolio-level recommendations
-  ✅ Deep backtesting & accuracy analysis
 
 ⚖️ OPTIONS & RISK ANALYSIS:
   ./run.sh analyze AAPL MSFT --period 1y  # Full analysis with options
@@ -1034,17 +806,7 @@ def main():
   ./run.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
   ./run.sh analyze PLTR --no-investment-advice  # Skip suggestions
 
-� PORTFOLIO MANAGEMENT:
-    ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
-    ./run.sh portfolio list
-    ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
-    ./run.sh portfolio tickers <portfolio_id>
-    ./run.sh portfolio analyze <portfolio_id> --period 6mo --summary-only
-    ./run.sh portfolio remove <portfolio_id> AAPL
-    ./run.sh portfolio history --portfolio-id <portfolio_id> --limit 5
-    ./run.sh portfolio accuracy --portfolio-id <portfolio_id>
-
-�💡 TIP: Use quotes for tickers with spaces: "SAAB B"
+💡 TIP: Use quotes for tickers with spaces: "SAAB B"
         """
     )
 
@@ -1068,8 +830,8 @@ def main():
     analyze_parser.add_argument('--no-options', action='store_true', help='Skip Black-Scholes options analysis')
     analyze_parser.add_argument('--no-investment-advice', action='store_true', help='Skip investment suggestions')
     analyze_parser.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
-    analyze_parser.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis')
-    analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
+    analyze_parser.add_argument('--include-deep', action='store_true', help='🔁 Enable deep backtesting analysis')
+    analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Deep analysis chunk size in months (default: 3)')
 
     # Seasonal analysis
     seasonal_parser = subparsers.add_parser('seasonal', help='🗓️ Seasonal & holiday analysis')
@@ -1127,55 +889,6 @@ def main():
     # List command
     list_parser = subparsers.add_parser('list', help='📋 List available data files')
 
-    # Portfolio management (grouped subcommands)
-    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, remove, tickers, analyze)')
-    port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
-
-    # portfolio create
-    p_create = port_sub.add_parser('create', help='Create a new portfolio')
-    p_create.add_argument('--name', '-n', required=True, help='Portfolio name (unique)')
-    p_create.add_argument('--description', '-d', default='', help='Portfolio description')
-
-    # portfolio list
-    p_list = port_sub.add_parser('list', help='List all portfolios')
-
-    # portfolio add ticker
-    p_add = port_sub.add_parser('add', help='Add a ticker to a portfolio')
-    p_add.add_argument('portfolio_id', help='Portfolio ID')
-    p_add.add_argument('ticker', help='Ticker symbol')
-    p_add.add_argument('--quantity', '-q', type=float, default=0.0, help='Quantity (default 0)')
-    p_add.add_argument('--avg-cost', '-c', type=float, default=0.0, help='Average cost (default 0)')
-
-    # portfolio remove ticker
-    p_remove = port_sub.add_parser('remove', help='Remove a ticker from a portfolio')
-    p_remove.add_argument('portfolio_id', help='Portfolio ID')
-    p_remove.add_argument('ticker', help='Ticker symbol')
-
-    # portfolio tickers
-    p_tickers = port_sub.add_parser('tickers', help='List tickers in a portfolio')
-    p_tickers.add_argument('portfolio_id', help='Portfolio ID')
-
-    # portfolio analyze
-    p_analyze = port_sub.add_parser('analyze', help='Run comprehensive analysis on all tickers in a portfolio')
-    p_analyze.add_argument('portfolio_id', help='Portfolio ID')
-    p_analyze.add_argument('--period', '-p', default='1y', help='Time period (default 1y)')
-    p_analyze.add_argument('--no-patterns', action='store_true', help='Skip pattern analysis')
-    p_analyze.add_argument('--no-events', action='store_true', help='Skip event correlation')
-    p_analyze.add_argument('--no-options', action='store_true', help='Skip options analysis')
-    p_analyze.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
-    p_analyze.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
-
-    # portfolio history (analysis history)
-    p_history = port_sub.add_parser('history', help='Show recent analysis history for a portfolio or ticker')
-    p_history.add_argument('--portfolio-id', help='Portfolio ID')
-    p_history.add_argument('--ticker', help='Ticker symbol')
-    p_history.add_argument('--limit', '-l', type=int, default=10, help='Number of records (default 10)')
-
-    # portfolio accuracy trends
-    p_accuracy = port_sub.add_parser('accuracy', help='Show accuracy trends for predictions')
-    p_accuracy.add_argument('--portfolio-id', help='Portfolio ID')
-    p_accuracy.add_argument('--ticker', help='Ticker symbol')
-
     args = parser.parse_args()
 
     if not args.command:
@@ -1186,19 +899,6 @@ def main():
     try:
         analysis = AdvancedStockAnalysis()
         legacy_analysis = StockAnalysis()  # For backward compatibility
-        # Import engine with a fallback to support running as a script (no package context)
-        try:
-            from clarifi_engine.engine import ClariFiEngine  # when package is recognized
-        except Exception:
-            # Fallback: adjust sys.path relative to this file
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            if current_dir not in sys.path:
-                sys.path.append(current_dir)
-            try:
-                from engine import ClariFiEngine  # local module import
-            except ImportError as ie:
-                raise ie
-        engine = None  # Lazy init
     except Exception as e:
         print(f"❌ Error initializing analysis tools: {e}")
         print("💡 Make sure all dependencies are installed: pip install -r requirements.txt")
@@ -1380,251 +1080,6 @@ def main():
 
         elif args.command == 'list':
             legacy_analysis.list_available_data()
-
-        elif args.command == 'portfolio':
-            # Ensure an action is provided
-            if not args.portfolio_cmd:
-                portfolio_parser.print_help()
-                return
-
-            # Lazy initialize engine
-            if engine is None:
-                engine = ClariFiEngine()
-
-            import json
-            from datetime import datetime
-
-            def format_portfolio_table(portfolios):
-                """Format portfolios as a clean table"""
-                if not portfolios:
-                    print("📁 No portfolios found")
-                    return
-
-                print("📁 Portfolios:")
-                print("┌─────────────────────────────────────────┬─────────────────┬───────────────────────────────┐")
-                print("│ ID (first 8 chars)                     │ Name            │ Description                   │")
-                print("├─────────────────────────────────────────┼─────────────────┼───────────────────────────────┤")
-                for p in portfolios:
-                    short_id = p['id'][:8] + "..."
-                    name = p['name'][:15]
-                    desc = (p.get('description', '') or '')[:29]
-                    print(f"│ {short_id:39} │ {name:15} │ {desc:29} │")
-                print("└─────────────────────────────────────────┴─────────────────┴───────────────────────────────┘")
-
-            def format_tickers_table(tickers, portfolio_id):
-                """Format tickers as a clean table"""
-                if not tickers:
-                    print(f"📊 No tickers in portfolio {portfolio_id[:8]}...")
-                    return
-
-                print(f"📊 Tickers in portfolio {portfolio_id[:8]}...:")
-                print("┌─────────┬──────────┬─────────────┬─────────────────┐")
-                print("│ Ticker  │ Quantity │ Avg Cost    │ Added Date      │")
-                print("├─────────┼──────────┼─────────────┼─────────────────┤")
-                for t in tickers:
-                    ticker = t['ticker'][:8]
-                    qty = f"{t.get('quantity', 0):.2f}"[:9]
-                    cost = f"${t.get('avg_cost', 0):.2f}"[:10]
-                    added = t.get('added_at', '')[:15]
-                    print(f"│ {ticker:7} │ {qty:8} │ {cost:11} │ {added:15} │")
-                print("└─────────┴──────────┴─────────────┴─────────────────┘")
-
-            def print_json_minimal(data, show_json=False):
-                """Print minimal JSON only when requested"""
-                if show_json:
-                    try:
-                        print("\n🔍 Raw JSON data:")
-                        print(json.dumps(data, indent=2))
-                    except Exception:
-                        print(data)
-
-            cmd = args.portfolio_cmd
-
-            if cmd == 'create':
-                result = engine.create_portfolio(args.name, args.description)
-                if result.get('success'):
-                    portfolio_id = result['portfolio_id']
-                    print(f"✅ Created portfolio '{args.name}'")
-                    print(f"   ID: {portfolio_id}")
-                    print(f"   Description: {args.description or '(none)'}")
-                else:
-                    print(f"❌ Failed to create portfolio: {result.get('error')}")
-
-            elif cmd == 'list':
-                portfolios = engine.get_portfolios()
-                format_portfolio_table(portfolios)
-
-            elif cmd == 'add':
-                result = engine.add_ticker_to_portfolio(
-                    args.portfolio_id, args.ticker,
-                    quantity=args.quantity, avg_cost=args.avg_cost
-                )
-                if result.get('success'):
-                    print(f"✅ Added {args.ticker.upper()} to portfolio")
-                    if args.quantity > 0:
-                        print(f"   Quantity: {args.quantity}")
-                    if args.avg_cost > 0:
-                        print(f"   Average cost: ${args.avg_cost:.2f}")
-                else:
-                    print(f"❌ Failed to add ticker: {result.get('error')}")
-
-            elif cmd == 'remove':
-                result = engine.remove_ticker_from_portfolio(args.portfolio_id, args.ticker)
-                if result.get('success'):
-                    print(f"✅ Removed {args.ticker.upper()} from portfolio")
-                else:
-                    print(f"❌ {result.get('message', 'Failed to remove ticker')}")
-
-            elif cmd == 'tickers':
-                tickers = engine.get_portfolio_tickers(args.portfolio_id)
-                format_tickers_table(tickers, args.portfolio_id)
-
-            elif cmd == 'analyze':
-                # Fetch tickers first
-                tickers = engine.get_portfolio_tickers(args.portfolio_id)
-                if not tickers:
-                    print(f"❌ No tickers in portfolio {args.portfolio_id[:8]}...")
-                    return
-                ticker_list = [t['ticker'] for t in tickers]
-                print(f"🚀 Analyzing portfolio {args.portfolio_id[:8]}...")
-                print(f"📊 Tickers: {', '.join(ticker_list)}")
-                print(f"📅 Period: {args.period}")
-
-                result = engine.comprehensive_analysis(
-                    tickers=ticker_list,
-                    portfolio_id=args.portfolio_id,
-                    period=args.period,
-                    include_patterns=not args.no_patterns,
-                    include_events=not args.no_events,
-                    include_options=not args.no_options,
-                    include_seasonal=not args.no_seasonal
-                )
-                if result.get('success'):
-                    print("\n📋 Portfolio Analysis Summary:")
-
-                    # Check if deep analysis was included
-                    has_deep_results = any('deep_analysis' in data for data in result['results'].values())
-
-                    if has_deep_results:
-                        print("┌─────────┬──────────────┬────────────┬─────────────┬─────────────────┐")
-                        print("│ Ticker  │ Recomm.      │ Confidence │ Risk Level  │ Accuracy        │")
-                        print("├─────────┼──────────────┼────────────┼─────────────┼─────────────────┤")
-                    else:
-                        print("┌─────────┬──────────────┬────────────┬─────────────┐")
-                        print("│ Ticker  │ Recomm.      │ Confidence │ Risk Level  │")
-                        print("├─────────┼──────────────┼────────────┼─────────────┤")
-
-                    for tk, data in result['results'].items():
-                        rec = data.get('overall_recommendation', 'N/A')
-                        conf = data.get('confidence_level', 'N/A')
-                        risk = data.get('risk_level', 'N/A')
-
-                        # Get precision if available
-                        precision = None
-                        if 'coefficient_of_precision' in data:
-                            precision = data['coefficient_of_precision']
-                        elif 'deep_analysis' in data and isinstance(data['deep_analysis'], dict):
-                            deep_summary = data['deep_analysis'].get('summary', {})
-                            precision = deep_summary.get('coefficient_of_precision')
-
-                        # Add emoji based on recommendation and precision
-                        if rec == 'BUY':
-                            if precision and precision > 0.7:
-                                emoji = "🟢💎"
-                            elif precision and precision > 0.5:
-                                emoji = "🟢📊"
-                            elif precision and precision < 0.5:
-                                emoji = "🟡⚠️"
-                            else:
-                                emoji = "🟢"
-                        elif rec == 'SELL':
-                            if precision and precision > 0.7:
-                                emoji = "🔴💎"
-                            elif precision and precision > 0.5:
-                                emoji = "🔴📊"
-                            elif precision and precision < 0.5:
-                                emoji = "🟡⚠️"
-                            else:
-                                emoji = "🔴"
-                        else:  # HOLD or N/A
-                            if precision and precision > 0.7:
-                                emoji = "🟡💎"
-                            elif precision and precision > 0.5:
-                                emoji = "🟡📊"
-                            elif precision and precision < 0.5:
-                                emoji = "⚪⚠️"
-                            else:
-                                emoji = "🟡"
-
-                        ticker_display = f"{emoji} {tk}"[:7]
-                        rec_display = rec[:12]
-                        conf_display = conf[:10]
-                        risk_display = risk[:11]
-
-                        if has_deep_results:
-                            if precision is not None:
-                                acc_display = f"{precision:.1%}"[:13]
-                            else:
-                                acc_display = "N/A"[:13]
-                            print(f"│ {ticker_display:7} │ {rec_display:12} │ {conf_display:10} │ {risk_display:11} │ {acc_display:15} │")
-                        else:
-                            print(f"│ {ticker_display:7} │ {rec_display:12} │ {conf_display:10} │ {risk_display:11} │")
-
-                    if has_deep_results:
-                        print("└─────────┴──────────────┴────────────┴─────────────┴─────────────────┘")
-                    else:
-                        print("└─────────┴──────────────┴────────────┴─────────────┘")
-
-                    # Show execution stats
-                    exec_time = result.get('execution_time', 0)
-                    analyzed_count = result.get('analyzed_tickers', 0)
-                    print(f"\n⏱️  Execution time: {exec_time:.2f}s")
-                    print(f"📊 Analyzed {analyzed_count} ticker(s)")
-                    print("✅ Portfolio analysis complete")
-
-                    print_json_minimal(result, show_json=not args.summary_only)
-                else:
-                    print(f"❌ Analysis failed: {result.get('error')}")
-                    print_json_minimal(result, show_json=True)
-
-            elif cmd == 'history':
-                history = engine.get_analysis_history(
-                    ticker=args.ticker, portfolio_id=args.portfolio_id, limit=args.limit
-                )
-                if history:
-                    print("📜 Recent Analysis History:")
-                    print("┌─────────────────────┬─────────┬─────────────────┐")
-                    print("│ Timestamp           │ Ticker  │ Recommendation  │")
-                    print("├─────────────────────┼─────────┼─────────────────┤")
-                    for h in history:
-                        ts = h.get('created_at', '')[:19]
-                        tkr = h.get('ticker', '')[:7]
-                        rec = (h.get('recommendation') or
-                               h.get('analysis_data', {}).get('overall_recommendation', 'N/A'))[:15]
-                        print(f"│ {ts:19} │ {tkr:7} │ {rec:15} │")
-                    print("└─────────────────────┴─────────┴─────────────────┘")
-                else:
-                    print("📜 No analysis history found")
-
-            elif cmd == 'accuracy':
-                trends = engine.get_accuracy_trends(
-                    ticker=args.ticker, portfolio_id=args.portfolio_id
-                )
-                if trends:
-                    print("📈 Accuracy Trends:")
-                    print("┌─────────┬─────────────────┬─────────────────┐")
-                    print("│ Ticker  │ Avg Accuracy    │ Total Comparisons│")
-                    print("├─────────┼─────────────────┼─────────────────┤")
-                    for t in trends:
-                        ticker = t.get('ticker', '')[:7]
-                        accuracy = f"{t.get('avg_accuracy', 0):.2%}"[:15]
-                        total = str(t.get('total_comparisons', 0))[:16]
-                        print(f"│ {ticker:7} │ {accuracy:15} │ {total:16} │")
-                    print("└─────────┴─────────────────┴─────────────────┘")
-                else:
-                    print("📈 No accuracy data found")
-            else:
-                portfolio_parser.print_help()
 
     except KeyboardInterrupt:
         print("\n⚠️  Operation cancelled by user")
