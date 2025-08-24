@@ -271,4 +271,4 @@ figures/
 data/
 graphs/
 venv/
-./history
+.history/
