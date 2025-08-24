@@ -25,6 +25,7 @@ try:
     from advanced_visualizer import AdvancedVisualizer
     from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
     from seasonal_analyzer import SeasonalAnalyzer
+    from live_monitor import LiveStockMonitor
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -1106,6 +1107,11 @@ def main():
   ./run.sh info PLTR QBTS "SAAB B"
   ./run.sh list
 
+📡 LIVE MONITORING:
+  ./run.sh live AAPL MSFT TSLA
+  ./run.sh live PLTR QBTS --interval 10
+  ./run.sh live AAPL --no-graphs --interval 3
+
 🎯 MARKET INTELLIGENCE FEATURES:
   ✅ Correlation pattern detection
   ✅ Leading indicator identification
@@ -1119,6 +1125,7 @@ def main():
   ✅ Investment suggestion engine
   ✅ Portfolio-level recommendations
   ✅ Deep backtesting & accuracy analysis
+  ✅ Real-time live monitoring with terminal graphs
 
 ⚖️ OPTIONS & RISK ANALYSIS:
   ./run.sh analyze AAPL MSFT --period 1y  # Full analysis with options
@@ -1220,6 +1227,13 @@ def main():
 
     # List command
     list_parser = subparsers.add_parser('list', help='📋 List available data files')
+
+    # Live monitoring command
+    live_parser = subparsers.add_parser('live', help='📡 Live real-time stock monitoring')
+    live_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols to monitor')
+    live_parser.add_argument('--interval', '-i', type=int, default=5, help='Update interval in seconds (default: 5)')
+    live_parser.add_argument('--no-graphs', action='store_true', help='Disable terminal graphs')
+    live_parser.add_argument('--no-summary', action='store_true', help='Disable summary table')
 
     # Portfolio management (grouped subcommands)
     portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, remove, tickers, analyze)')
@@ -1474,6 +1488,23 @@ def main():
 
         elif args.command == 'list':
             legacy_analysis.list_available_data()
+
+        elif args.command == 'live':
+            # Initialize live monitor
+            monitor = LiveStockMonitor()
+            monitor.update_interval = args.interval
+            monitor.add_tickers(args.tickers)
+
+            print(f"🚀 Starting live monitoring for: {', '.join(args.tickers)}")
+            print(f"📊 Update interval: {args.interval} seconds")
+            print(f"📈 Features: Graphs={'enabled' if not args.no_graphs else 'disabled'}, Summary={'enabled' if not args.no_summary else 'disabled'}")
+            print()
+
+            # Start monitoring
+            monitor.monitor(
+                show_graphs=not args.no_graphs,
+                show_summary=not args.no_summary
+            )
 
         elif args.command == 'portfolio':
             # Ensure an action is provided

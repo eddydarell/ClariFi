@@ -9,3 +9,5 @@ fastapi>=0.104.0
 uvicorn>=0.24.0
 websockets>=11.0
 python-multipart>=0.0.6
+colorama>=0.4.6
+plotext>=5.2.8
