@@ -245,29 +245,15 @@ class ClariFiEngine:
                     try:
                         stock_data_dict = {ticker: stock_data}
                         event_data = self.event_correlator.correlate_events_with_movements(stock_data_dict)
-                        print(f"DEBUG: Event data type: {type(event_data)}")
-                        print(f"DEBUG: Event data keys: {list(event_data.keys()) if isinstance(event_data, dict) else 'Not a dict'}")
 
-                        # Test serialization of event_data before assigning
+                        # Make event data JSON serializable if needed
                         try:
                             import json
-                            test_serialization = json.dumps(event_data, default=str)
-                            print("DEBUG: Event data is JSON serializable")
-                        except Exception as serialize_error:
-                            print(f"DEBUG: Event data serialization failed: {serialize_error}")
-                            # Try to make it serializable
+                            json.dumps(event_data, default=str)
+                        except Exception:
                             event_data = self._make_json_serializable(event_data)
-                            print("DEBUG: Applied _make_json_serializable to event_data")
 
                         ticker_results["events"] = event_data
-
-                        # Test ticker_results serialization after adding event data
-                        try:
-                            import json
-                            test_ticker_serialization = json.dumps(ticker_results, default=str)
-                            print("DEBUG: ticker_results after events is JSON serializable")
-                        except Exception as ticker_serialize_error:
-                            print(f"DEBUG: ticker_results serialization failed after events: {ticker_serialize_error}")
 
                     except Exception as e:
                         ticker_results["events"] = {"error": f"Event analysis failed: {str(e)}"}
@@ -276,28 +262,15 @@ class ClariFiEngine:
                 if include_options:
                     print(f"⚖️ Running options analysis for {ticker}...")
                     try:
-                        print("DEBUG: About to call options_analyzer.analyze_options")
                         options_data = self.options_analyzer.analyze_options(ticker, stock_data)
-                        print("DEBUG: options_analyzer.analyze_options completed")
                         ticker_results["options"] = options_data
                     except Exception as e:
-                        print(f"DEBUG: Options analysis failed with error: {e}")
                         ticker_results["options"] = {"error": f"Options analysis failed: {str(e)}"}
 
                     try:
-                        print("DEBUG: About to call investment_advisor.generate_investment_suggestion")
-                        print(f"DEBUG: stock_data type: {type(stock_data)}")
-                        print(f"DEBUG: stock_data shape: {stock_data.shape}")
-                        print(f"DEBUG: stock_data columns: {list(stock_data.columns)}")
-                        print(f"DEBUG: stock_data index type: {type(stock_data.index)}")
-                        print(f"DEBUG: stock_data dtypes: {stock_data.dtypes}")
                         investment_advice = self.investment_advisor.generate_investment_suggestion(stock_data)
-                        print("DEBUG: investment_advisor.generate_investment_suggestion completed")
                         ticker_results["investment_advice"] = investment_advice
                     except Exception as e:
-                        print(f"DEBUG: Investment advice failed with error: {e}")
-                        import traceback
-                        traceback.print_exc()
                         ticker_results["investment_advice"] = {"error": f"Investment advice failed: {str(e)}"}
 
                 # Seasonal Analysis
@@ -305,39 +278,18 @@ class ClariFiEngine:
                     print(f"🗓️ Running seasonal analysis for {ticker}...")
                     try:
                         seasonal_data = self.seasonal_analyzer.analyze(stock_data)
-                        print(f"DEBUG: Seasonal data type: {type(seasonal_data)}")
-                        print(f"DEBUG: Seasonal data content: {seasonal_data}")
-                        if hasattr(seasonal_data, '__dict__'):
-                            print(f"DEBUG: Seasonal data attributes: {seasonal_data.__dict__}")
                         ticker_results["seasonal"] = seasonal_data
                     except Exception as e:
                         ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
 
                 # Generate overall recommendation
-                print("DEBUG: About to generate overall recommendation")
-                try:
-                    import json
-                    test_before_recommendation = json.dumps(ticker_results, default=str)
-                    print("DEBUG: ticker_results before recommendation is JSON serializable")
-                except Exception as before_rec_error:
-                    print(f"DEBUG: ticker_results before recommendation serialization failed: {before_rec_error}")
-
                 recommendation, confidence, risk_level = self._generate_overall_recommendation(ticker_results)
                 ticker_results["overall_recommendation"] = recommendation
                 ticker_results["confidence_level"] = confidence
                 ticker_results["risk_level"] = risk_level
 
-                print("DEBUG: Added recommendation to ticker_results")
-                try:
-                    import json
-                    test_after_recommendation = json.dumps(ticker_results, default=str)
-                    print("DEBUG: ticker_results after recommendation is JSON serializable")
-                except Exception as after_rec_error:
-                    print(f"DEBUG: ticker_results after recommendation serialization failed: {after_rec_error}")
-
                 # Save to database if requested
                 if save_to_db:
-                    print("DEBUG: About to save to database")
                     analysis_id = self.analysis_model.save(
                         portfolio_id=portfolio_id,
                         ticker=ticker,
@@ -348,38 +300,15 @@ class ClariFiEngine:
                         risk_level=risk_level
                     )
                     ticker_results["analysis_id"] = analysis_id
-                    print("DEBUG: Saved to database and added analysis_id")
 
-                print(f"DEBUG: About to assign {ticker} to results")
-                print(f"DEBUG: ticker_results keys: {list(ticker_results.keys())}")
                 results[ticker] = ticker_results
 
-                print(f"DEBUG: Added {ticker} to results")
-                try:
-                    import json
-                    test_results_dict = json.dumps(results, default=str)
-                    print("DEBUG: Full results dict is JSON serializable")
-                except Exception as results_error:
-                    print(f"DEBUG: Full results dict serialization failed: {results_error}")
-
             execution_time = time.time() - start_time
-
-            print("DEBUG: About to call _make_json_serializable on results")
-            print(f"DEBUG: Results keys before serialization: {list(results.keys()) if results else 'None'}")
 
             # Make all results JSON-serializable
             try:
                 serializable_results = self._make_json_serializable(results)
-                print("DEBUG: _make_json_serializable completed successfully")
             except Exception as e:
-                print(f"DEBUG: Serialization error: {e}")
-                print(f"DEBUG: Results keys: {list(results.keys()) if results else 'None'}")
-                if results:
-                    for ticker, data in results.items():
-                        print(f"DEBUG: {ticker} data keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-                        if isinstance(data, dict):
-                            for key, value in data.items():
-                                print(f"DEBUG: {ticker}.{key} type: {type(value)}")
                 raise Exception(f"JSON serialization failed: {str(e)}")
 
             return {

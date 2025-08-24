@@ -736,7 +736,17 @@ def main():
   ./run.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
   ./run.sh analyze PLTR --no-investment-advice  # Skip suggestions
 
-💡 TIP: Use quotes for tickers with spaces: "SAAB B"
+� PORTFOLIO MANAGEMENT:
+    ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
+    ./run.sh portfolio list
+    ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
+    ./run.sh portfolio tickers <portfolio_id>
+    ./run.sh portfolio analyze <portfolio_id> --period 6mo --summary-only
+    ./run.sh portfolio remove <portfolio_id> AAPL
+    ./run.sh portfolio history --portfolio-id <portfolio_id> --limit 5
+    ./run.sh portfolio accuracy --portfolio-id <portfolio_id>
+
+�💡 TIP: Use quotes for tickers with spaces: "SAAB B"
         """
     )
 
@@ -817,6 +827,55 @@ def main():
     # List command
     list_parser = subparsers.add_parser('list', help='📋 List available data files')
 
+    # Portfolio management (grouped subcommands)
+    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, remove, tickers, analyze)')
+    port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
+
+    # portfolio create
+    p_create = port_sub.add_parser('create', help='Create a new portfolio')
+    p_create.add_argument('--name', '-n', required=True, help='Portfolio name (unique)')
+    p_create.add_argument('--description', '-d', default='', help='Portfolio description')
+
+    # portfolio list
+    p_list = port_sub.add_parser('list', help='List all portfolios')
+
+    # portfolio add ticker
+    p_add = port_sub.add_parser('add', help='Add a ticker to a portfolio')
+    p_add.add_argument('portfolio_id', help='Portfolio ID')
+    p_add.add_argument('ticker', help='Ticker symbol')
+    p_add.add_argument('--quantity', '-q', type=float, default=0.0, help='Quantity (default 0)')
+    p_add.add_argument('--avg-cost', '-c', type=float, default=0.0, help='Average cost (default 0)')
+
+    # portfolio remove ticker
+    p_remove = port_sub.add_parser('remove', help='Remove a ticker from a portfolio')
+    p_remove.add_argument('portfolio_id', help='Portfolio ID')
+    p_remove.add_argument('ticker', help='Ticker symbol')
+
+    # portfolio tickers
+    p_tickers = port_sub.add_parser('tickers', help='List tickers in a portfolio')
+    p_tickers.add_argument('portfolio_id', help='Portfolio ID')
+
+    # portfolio analyze
+    p_analyze = port_sub.add_parser('analyze', help='Run comprehensive analysis on all tickers in a portfolio')
+    p_analyze.add_argument('portfolio_id', help='Portfolio ID')
+    p_analyze.add_argument('--period', '-p', default='1y', help='Time period (default 1y)')
+    p_analyze.add_argument('--no-patterns', action='store_true', help='Skip pattern analysis')
+    p_analyze.add_argument('--no-events', action='store_true', help='Skip event correlation')
+    p_analyze.add_argument('--no-options', action='store_true', help='Skip options analysis')
+    p_analyze.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
+    p_analyze.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
+
+    # portfolio history (analysis history)
+    p_history = port_sub.add_parser('history', help='Show recent analysis history for a portfolio or ticker')
+    p_history.add_argument('--portfolio-id', help='Portfolio ID')
+    p_history.add_argument('--ticker', help='Ticker symbol')
+    p_history.add_argument('--limit', '-l', type=int, default=10, help='Number of records (default 10)')
+
+    # portfolio accuracy trends
+    p_accuracy = port_sub.add_parser('accuracy', help='Show accuracy trends for predictions')
+    p_accuracy.add_argument('--portfolio-id', help='Portfolio ID')
+    p_accuracy.add_argument('--ticker', help='Ticker symbol')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -827,6 +886,19 @@ def main():
     try:
         analysis = AdvancedStockAnalysis()
         legacy_analysis = StockAnalysis()  # For backward compatibility
+        # Import engine with a fallback to support running as a script (no package context)
+        try:
+            from clarifi_engine.engine import ClariFiEngine  # when package is recognized
+        except Exception:
+            # Fallback: adjust sys.path relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.append(current_dir)
+            try:
+                from engine import ClariFiEngine  # local module import
+            except ImportError as ie:
+                raise ie
+        engine = None  # Lazy init
     except Exception as e:
         print(f"❌ Error initializing analysis tools: {e}")
         print("💡 Make sure all dependencies are installed: pip install -r requirements.txt")
@@ -1006,6 +1078,187 @@ def main():
 
         elif args.command == 'list':
             legacy_analysis.list_available_data()
+
+        elif args.command == 'portfolio':
+            # Ensure an action is provided
+            if not args.portfolio_cmd:
+                portfolio_parser.print_help()
+                return
+
+            # Lazy initialize engine
+            if engine is None:
+                engine = ClariFiEngine()
+
+            import json
+            from datetime import datetime
+
+            def format_portfolio_table(portfolios):
+                """Format portfolios as a clean table"""
+                if not portfolios:
+                    print("📁 No portfolios found")
+                    return
+
+                print("📁 Portfolios:")
+                print("┌─────────────────────────────────────────┬─────────────────┬───────────────────────────────┐")
+                print("│ ID (first 8 chars)                     │ Name            │ Description                   │")
+                print("├─────────────────────────────────────────┼─────────────────┼───────────────────────────────┤")
+                for p in portfolios:
+                    short_id = p['id'][:8] + "..."
+                    name = p['name'][:15]
+                    desc = (p.get('description', '') or '')[:29]
+                    print(f"│ {short_id:39} │ {name:15} │ {desc:29} │")
+                print("└─────────────────────────────────────────┴─────────────────┴───────────────────────────────┘")
+
+            def format_tickers_table(tickers, portfolio_id):
+                """Format tickers as a clean table"""
+                if not tickers:
+                    print(f"📊 No tickers in portfolio {portfolio_id[:8]}...")
+                    return
+
+                print(f"📊 Tickers in portfolio {portfolio_id[:8]}...:")
+                print("┌─────────┬──────────┬─────────────┬─────────────────┐")
+                print("│ Ticker  │ Quantity │ Avg Cost    │ Added Date      │")
+                print("├─────────┼──────────┼─────────────┼─────────────────┤")
+                for t in tickers:
+                    ticker = t['ticker'][:8]
+                    qty = f"{t.get('quantity', 0):.2f}"[:9]
+                    cost = f"${t.get('avg_cost', 0):.2f}"[:10]
+                    added = t.get('added_at', '')[:15]
+                    print(f"│ {ticker:7} │ {qty:8} │ {cost:11} │ {added:15} │")
+                print("└─────────┴──────────┴─────────────┴─────────────────┘")
+
+            def print_json_minimal(data, show_json=False):
+                """Print minimal JSON only when requested"""
+                if show_json:
+                    try:
+                        print("\n🔍 Raw JSON data:")
+                        print(json.dumps(data, indent=2))
+                    except Exception:
+                        print(data)
+
+            cmd = args.portfolio_cmd
+
+            if cmd == 'create':
+                result = engine.create_portfolio(args.name, args.description)
+                if result.get('success'):
+                    portfolio_id = result['portfolio_id']
+                    print(f"✅ Created portfolio '{args.name}'")
+                    print(f"   ID: {portfolio_id}")
+                    print(f"   Description: {args.description or '(none)'}")
+                else:
+                    print(f"❌ Failed to create portfolio: {result.get('error')}")
+
+            elif cmd == 'list':
+                portfolios = engine.get_portfolios()
+                format_portfolio_table(portfolios)
+
+            elif cmd == 'add':
+                result = engine.add_ticker_to_portfolio(
+                    args.portfolio_id, args.ticker,
+                    quantity=args.quantity, avg_cost=args.avg_cost
+                )
+                if result.get('success'):
+                    print(f"✅ Added {args.ticker.upper()} to portfolio")
+                    if args.quantity > 0:
+                        print(f"   Quantity: {args.quantity}")
+                    if args.avg_cost > 0:
+                        print(f"   Average cost: ${args.avg_cost:.2f}")
+                else:
+                    print(f"❌ Failed to add ticker: {result.get('error')}")
+
+            elif cmd == 'remove':
+                result = engine.remove_ticker_from_portfolio(args.portfolio_id, args.ticker)
+                if result.get('success'):
+                    print(f"✅ Removed {args.ticker.upper()} from portfolio")
+                else:
+                    print(f"❌ {result.get('message', 'Failed to remove ticker')}")
+
+            elif cmd == 'tickers':
+                tickers = engine.get_portfolio_tickers(args.portfolio_id)
+                format_tickers_table(tickers, args.portfolio_id)
+
+            elif cmd == 'analyze':
+                # Fetch tickers first
+                tickers = engine.get_portfolio_tickers(args.portfolio_id)
+                if not tickers:
+                    print(f"❌ No tickers in portfolio {args.portfolio_id[:8]}...")
+                    return
+                ticker_list = [t['ticker'] for t in tickers]
+                print(f"🚀 Analyzing portfolio {args.portfolio_id[:8]}...")
+                print(f"📊 Tickers: {', '.join(ticker_list)}")
+                print(f"📅 Period: {args.period}")
+
+                result = engine.comprehensive_analysis(
+                    tickers=ticker_list,
+                    portfolio_id=args.portfolio_id,
+                    period=args.period,
+                    include_patterns=not args.no_patterns,
+                    include_events=not args.no_events,
+                    include_options=not args.no_options,
+                    include_seasonal=not args.no_seasonal
+                )
+                if result.get('success'):
+                    print("\n📋 Portfolio Analysis Summary:")
+                    print("┌─────────┬──────────────┬────────────┬─────────────┐")
+                    print("│ Ticker  │ Recomm.      │ Confidence │ Risk Level  │")
+                    print("├─────────┼──────────────┼────────────┼─────────────┤")
+                    for tk, data in result['results'].items():
+                        rec = data.get('overall_recommendation', 'N/A')[:12]
+                        conf = data.get('confidence_level', 'N/A')[:10]
+                        risk = data.get('risk_level', 'N/A')[:11]
+                        print(f"│ {tk:7} │ {rec:12} │ {conf:10} │ {risk:11} │")
+                    print("└─────────┴──────────────┴────────────┴─────────────┘")
+
+                    # Show execution stats
+                    exec_time = result.get('execution_time', 0)
+                    analyzed_count = result.get('analyzed_tickers', 0)
+                    print(f"\n⏱️  Execution time: {exec_time:.2f}s")
+                    print(f"📊 Analyzed {analyzed_count} ticker(s)")
+                    print("✅ Portfolio analysis complete")
+
+                    print_json_minimal(result, show_json=not args.summary_only)
+                else:
+                    print(f"❌ Analysis failed: {result.get('error')}")
+                    print_json_minimal(result, show_json=True)
+
+            elif cmd == 'history':
+                history = engine.get_analysis_history(
+                    ticker=args.ticker, portfolio_id=args.portfolio_id, limit=args.limit
+                )
+                if history:
+                    print("📜 Recent Analysis History:")
+                    print("┌─────────────────────┬─────────┬─────────────────┐")
+                    print("│ Timestamp           │ Ticker  │ Recommendation  │")
+                    print("├─────────────────────┼─────────┼─────────────────┤")
+                    for h in history:
+                        ts = h.get('created_at', '')[:19]
+                        tkr = h.get('ticker', '')[:7]
+                        rec = (h.get('recommendation') or
+                               h.get('analysis_data', {}).get('overall_recommendation', 'N/A'))[:15]
+                        print(f"│ {ts:19} │ {tkr:7} │ {rec:15} │")
+                    print("└─────────────────────┴─────────┴─────────────────┘")
+                else:
+                    print("📜 No analysis history found")
+
+            elif cmd == 'accuracy':
+                trends = engine.get_accuracy_trends(
+                    ticker=args.ticker, portfolio_id=args.portfolio_id
+                )
+                if trends:
+                    print("📈 Accuracy Trends:")
+                    print("┌─────────┬─────────────────┬─────────────────┐")
+                    print("│ Ticker  │ Avg Accuracy    │ Total Comparisons│")
+                    print("├─────────┼─────────────────┼─────────────────┤")
+                    for t in trends:
+                        ticker = t.get('ticker', '')[:7]
+                        accuracy = f"{t.get('avg_accuracy', 0):.2%}"[:15]
+                        total = str(t.get('total_comparisons', 0))[:16]
+                        print(f"│ {ticker:7} │ {accuracy:15} │ {total:16} │")
+                    print("└─────────┴─────────────────┴─────────────────┘")
+                else:
+                    print("📈 No accuracy data found")
+            else:
+                portfolio_parser.print_help()
 
     except KeyboardInterrupt:
         print("\n⚠️  Operation cancelled by user")
