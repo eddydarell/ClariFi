@@ -503,25 +503,53 @@ class AdvancedStockAnalysis:
                     print(f"      {movement['ticker']} on {movement['date']}: "
                           f"{movement['return_pct']:.1f}% ({movement['magnitude']})")
 
-        # Options Analysis Summary
+        # Enhanced Options & Risk Analysis Summary
         if options_results:
-            print(f"\n⚖️ BLACK-SCHOLES RISK ANALYSIS:")
+            print(f"\n⚖️ COMPREHENSIVE RISK ANALYSIS:")
             for ticker, risk_data in options_results.items():
                 risk_level = risk_data['risk_assessment']
-                current_vol = risk_data['current_volatility']
-                vol_percentile = risk_data.get('volatility_percentile', 'N/A')
+
+                # Get comprehensive risk data
+                comprehensive_risk = risk_data.get('comprehensive_risk', {})
+                var_95 = comprehensive_risk.get('var_95_daily', 'N/A')
+                cvar_95 = comprehensive_risk.get('cvar_95_daily', 'N/A')
+                sharpe = comprehensive_risk.get('sharpe_ratio', 'N/A')
+                sortino = comprehensive_risk.get('sortino_ratio', 'N/A')
 
                 risk_emoji = "🔴" if "High" in risk_level else \
                            "🟡" if "Moderate" in risk_level else "🟢"
 
-                print(f"  {risk_emoji} {ticker}: {risk_level} "
-                      f"(Vol: {current_vol:.1%}, Percentile: {vol_percentile if vol_percentile != 'N/A' else 'N/A'})")
+                print(f"  {risk_emoji} {ticker}: {risk_level}")
 
-                # Show expected moves for 30d and 90d
-                for timeframe in ['30d', '90d']:
-                    if timeframe in risk_data['risk_metrics']:
-                        expected_move = risk_data['risk_metrics'][timeframe]['expected_move']
-                        print(f"      📊 {timeframe} expected move: ±{expected_move:.1%}")
+                # Enhanced risk metrics display
+                if var_95 != 'N/A' and cvar_95 != 'N/A':
+                    print(f"      📊 VaR (95%): {var_95} | CVaR (95%): {cvar_95}")
+
+                if sharpe != 'N/A' and sortino != 'N/A':
+                    sharpe_emoji = "🌟" if sharpe > 1.0 else "📊" if sharpe > 0.5 else "❌"
+                    print(f"      {sharpe_emoji} Sharpe: {sharpe} | Sortino: {sortino}")
+
+                # Model comparison insights
+                model_comparison = comprehensive_risk.get('model_comparison', {})
+                merton_premium = model_comparison.get('merton_premium_pct', 0)
+                heston_premium = model_comparison.get('heston_premium_pct', 0)
+
+                if abs(merton_premium) > 2 or abs(heston_premium) > 2:
+                    print(f"      ⚡ Jump risk premium: {merton_premium:.1f}% | Vol clustering: {heston_premium:.1f}%")
+
+                # Show key risk interpretation (first insight)
+                risk_interpretation = comprehensive_risk.get('risk_interpretation', [])
+                if risk_interpretation:
+                    print(f"      💡 {risk_interpretation[0]}")
+
+                # Traditional expected moves for context
+                if 'risk_metrics' in risk_data:
+                    for timeframe in ['30d', '90d']:
+                        if timeframe in risk_data['risk_metrics']:
+                            expected_move = risk_data['risk_metrics'][timeframe]['expected_move']
+                            print(f"      � {timeframe} expected move: ±{expected_move:.1%}")
+
+                print()  # Add spacing between tickers
 
         # Investment Suggestions Summary
         if portfolio_advice:
@@ -613,7 +641,7 @@ class AdvancedStockAnalysis:
                 insights.append(f"🎯 Most stable correlation: {stable_pairs[0]['pair']} "
                               f"({stable_pairs[0]['correlation']:.3f})")
 
-        # Add options-based insights
+        # Add enhanced risk-based insights
         if options_results:
             high_vol_stocks = [ticker for ticker, data in options_results.items()
                              if "High" in data['risk_assessment']]
@@ -624,6 +652,46 @@ class AdvancedStockAnalysis:
                             if "Low" in data['risk_assessment']]
             if low_vol_stocks:
                 insights.append(f"💎 Low volatility (stable): {', '.join(low_vol_stocks)}")
+
+            # VaR-based insights
+            high_var_stocks = []
+            low_var_stocks = []
+            jump_risk_stocks = []
+            excellent_sharpe_stocks = []
+
+            for ticker, data in options_results.items():
+                comprehensive_risk = data.get('comprehensive_risk', {})
+
+                # Extract VaR as float for comparison
+                var_95_str = comprehensive_risk.get('var_95_daily', '0%')
+                try:
+                    var_95 = float(var_95_str.replace('%', ''))
+                    if var_95 > 5:
+                        high_var_stocks.append(ticker)
+                    elif var_95 < 2:
+                        low_var_stocks.append(ticker)
+                except:
+                    pass
+
+                # Sharpe ratio insights
+                sharpe = comprehensive_risk.get('sharpe_ratio', 0)
+                if sharpe > 1.5:
+                    excellent_sharpe_stocks.append(ticker)
+
+                # Jump risk insights
+                model_comparison = comprehensive_risk.get('model_comparison', {})
+                merton_premium = model_comparison.get('merton_premium_pct', 0)
+                if abs(merton_premium) > 5:
+                    jump_risk_stocks.append(ticker)
+
+            if high_var_stocks:
+                insights.append(f"🚨 High daily risk (VaR >5%): {', '.join(high_var_stocks)}")
+            if low_var_stocks:
+                insights.append(f"🛡️ Low daily risk (VaR <2%): {', '.join(low_var_stocks)}")
+            if excellent_sharpe_stocks:
+                insights.append(f"🌟 Excellent risk-adjusted returns: {', '.join(excellent_sharpe_stocks)}")
+            if jump_risk_stocks:
+                insights.append(f"⚡ Significant crash/spike risk: {', '.join(jump_risk_stocks)}")
 
         # Add investment advisor insights
         if portfolio_advice:

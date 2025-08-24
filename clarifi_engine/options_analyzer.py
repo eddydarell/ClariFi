@@ -9,7 +9,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from scipy.stats import norm
+from scipy.stats import norm, poisson, t
+from scipy.optimize import minimize
+import math
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -160,6 +162,352 @@ class OptionsAnalyzer:
 
         return sigma
 
+    def merton_jump_diffusion_price(self, S, K, T, r, sigma, lambda_jump, mu_jump, sigma_jump, option_type='call'):
+        """
+        Calculate option price using Merton Jump-Diffusion model.
+        Accounts for sudden jumps in stock prices (e.g., earnings surprises, crashes).
+
+        Args:
+            S (float): Current stock price
+            K (float): Strike price
+            T (float): Time to expiration (in years)
+            r (float): Risk-free rate
+            sigma (float): Volatility of the diffusion component
+            lambda_jump (float): Jump intensity (jumps per year)
+            mu_jump (float): Expected jump size (mean of log-jump)
+            sigma_jump (float): Jump volatility (std of log-jump)
+            option_type (str): 'call' or 'put'
+
+        Returns:
+            float: Option price under jump-diffusion model
+        """
+        if T <= 0:
+            return max(S - K, 0) if option_type == 'call' else max(K - S, 0)
+
+        # Maximum number of jumps to consider
+        max_jumps = int(lambda_jump * T * 3) + 10  # 3 standard deviations + buffer
+
+        option_price = 0.0
+
+        for n in range(max_jumps):
+            # Probability of exactly n jumps
+            jump_prob = (np.exp(-lambda_jump * T) * (lambda_jump * T)**n) / math.factorial(n)
+
+            # Adjusted parameters for n jumps
+            r_adj = r - lambda_jump * (np.exp(mu_jump + 0.5 * sigma_jump**2) - 1)
+            sigma_adj = np.sqrt(sigma**2 + n * sigma_jump**2 / T)
+            S_adj = S * np.exp(n * (mu_jump + 0.5 * sigma_jump**2))
+
+            # Black-Scholes price with adjusted parameters
+            if option_type == 'call':
+                bs_price = self.black_scholes_call(S_adj, K, T, r_adj, sigma_adj)
+            else:
+                bs_price = self.black_scholes_put(S_adj, K, T, r_adj, sigma_adj)
+
+            option_price += jump_prob * bs_price
+
+            # Early termination if probability becomes negligible
+            if jump_prob < 1e-8:
+                break
+
+        return option_price
+
+    def heston_model_price(self, S, K, T, r, v0, kappa, theta, sigma_v, rho, option_type='call'):
+        """
+        Calculate option price using Heston stochastic volatility model.
+        Allows volatility to be random, capturing volatility clustering.
+
+        Args:
+            S (float): Current stock price
+            K (float): Strike price
+            T (float): Time to expiration (in years)
+            r (float): Risk-free rate
+            v0 (float): Initial volatility
+            kappa (float): Mean reversion speed
+            theta (float): Long-term volatility mean
+            sigma_v (float): Volatility of volatility
+            rho (float): Correlation between stock and volatility
+            option_type (str): 'call' or 'put'
+
+        Returns:
+            float: Option price under Heston model
+        """
+        if T <= 0:
+            return max(S - K, 0) if option_type == 'call' else max(K - S, 0)
+
+        # Use characteristic function approach (simplified implementation)
+        # For production use, would implement full Fourier transform method
+
+        # Approximate using time-averaged volatility approach
+        # This is a simplified version - full Heston requires complex numerical methods
+        avg_vol = np.sqrt(theta + (v0 - theta) * (1 - np.exp(-kappa * T)) / (kappa * T))
+
+        # Adjust for volatility risk premium
+        vol_adjustment = 1 + 0.1 * sigma_v * np.sqrt(T)  # Simplified adjustment
+        effective_vol = avg_vol * vol_adjustment
+
+        # Use Black-Scholes with effective volatility
+        if option_type == 'call':
+            return self.black_scholes_call(S, K, T, r, effective_vol)
+        else:
+            return self.black_scholes_put(S, K, T, r, effective_vol)
+
+    def calculate_var(self, returns, confidence_level=0.05, method='historical'):
+        """
+        Calculate Value-at-Risk (VaR) - maximum potential loss over time horizon.
+
+        Args:
+            returns (pd.Series): Return series
+            confidence_level (float): Confidence level (0.05 = 95% VaR)
+            method (str): 'historical', 'parametric', or 'monte_carlo'
+
+        Returns:
+            float: VaR estimate (positive value representing loss)
+        """
+        if len(returns) == 0:
+            return 0.0
+
+        if method == 'historical':
+            # Historical simulation VaR
+            return -np.percentile(returns, confidence_level * 100)
+
+        elif method == 'parametric':
+            # Assume normal distribution
+            mean = returns.mean()
+            std = returns.std()
+            var_cutoff = norm.ppf(confidence_level, mean, std)
+            return -var_cutoff
+
+        elif method == 'monte_carlo':
+            # Monte Carlo simulation (simplified)
+            mean = returns.mean()
+            std = returns.std()
+            n_simulations = 10000
+
+            # Generate random returns
+            simulated_returns = np.random.normal(mean, std, n_simulations)
+            return -np.percentile(simulated_returns, confidence_level * 100)
+
+        else:
+            raise ValueError("Method must be 'historical', 'parametric', or 'monte_carlo'")
+
+    def calculate_cvar(self, returns, confidence_level=0.05):
+        """
+        Calculate Conditional Value-at-Risk (CVaR) - expected loss beyond VaR.
+        More robust for tail risks than VaR.
+
+        Args:
+            returns (pd.Series): Return series
+            confidence_level (float): Confidence level (0.05 = 95% CVaR)
+
+        Returns:
+            float: CVaR estimate (positive value representing expected loss)
+        """
+        if len(returns) == 0:
+            return 0.0
+
+        var_threshold = -self.calculate_var(returns, confidence_level, 'historical')
+
+        # Calculate expected loss beyond VaR threshold
+        tail_losses = returns[returns <= var_threshold]
+
+        if len(tail_losses) == 0:
+            return -var_threshold  # Return VaR if no tail losses
+
+        return -tail_losses.mean()
+
+    def calculate_risk_ratios(self, returns, risk_free_rate=None):
+        """
+        Calculate Sharpe and Sortino ratios for risk-adjusted performance.
+
+        Args:
+            returns (pd.Series): Return series
+            risk_free_rate (float): Risk-free rate (annualized)
+
+        Returns:
+            dict: Risk ratios and metrics
+        """
+        if risk_free_rate is None:
+            risk_free_rate = self.risk_free_rate
+
+        if len(returns) == 0:
+            return {'sharpe_ratio': 0, 'sortino_ratio': 0, 'calmar_ratio': 0}
+
+        # Annualize returns
+        annual_return = returns.mean() * 252
+        annual_vol = returns.std() * np.sqrt(252)
+
+        # Downside deviation (for Sortino ratio)
+        downside_returns = returns[returns < 0]
+        downside_vol = downside_returns.std() * np.sqrt(252) if len(downside_returns) > 0 else 0
+
+        # Maximum drawdown
+        cumulative_returns = (1 + returns).cumprod()
+        rolling_max = cumulative_returns.expanding().max()
+        drawdowns = (cumulative_returns - rolling_max) / rolling_max
+        max_drawdown = drawdowns.min()
+
+        # Calculate ratios
+        excess_return = annual_return - risk_free_rate
+
+        sharpe_ratio = excess_return / annual_vol if annual_vol > 0 else 0
+        sortino_ratio = excess_return / downside_vol if downside_vol > 0 else 0
+        calmar_ratio = excess_return / abs(max_drawdown) if max_drawdown < 0 else 0
+
+        return {
+            'sharpe_ratio': sharpe_ratio,
+            'sortino_ratio': sortino_ratio,
+            'calmar_ratio': calmar_ratio,
+            'annual_return': annual_return,
+            'annual_volatility': annual_vol,
+            'max_drawdown': max_drawdown,
+            'downside_volatility': downside_vol
+        }
+
+    def comprehensive_risk_analysis(self, stock_data, window=30):
+        """
+        Perform comprehensive risk analysis using multiple models and measures.
+
+        Args:
+            stock_data (pd.DataFrame): Stock price data
+            window (int): Rolling window for calculations
+
+        Returns:
+            dict: Comprehensive risk analysis results
+        """
+        try:
+            returns = stock_data['Close'].pct_change().dropna()
+            current_price = stock_data['Close'].iloc[-1]
+
+            # Basic risk metrics
+            basic_risk = self.analyze_stock_risk(stock_data, window)
+
+            # Advanced VaR measures
+            var_95 = self.calculate_var(returns, 0.05, 'historical')
+            var_99 = self.calculate_var(returns, 0.01, 'historical')
+            cvar_95 = self.calculate_cvar(returns, 0.05)
+            cvar_99 = self.calculate_cvar(returns, 0.01)
+
+            # Risk ratios
+            risk_ratios = self.calculate_risk_ratios(returns)
+
+            # Jump-diffusion parameters estimation (simplified)
+            # In practice, these would be calibrated to market data
+            lambda_jump = 2.0  # 2 jumps per year on average
+            mu_jump = -0.1     # Average jump is -10%
+            sigma_jump = 0.2   # Jump volatility 20%
+
+            # Heston model parameters (simplified calibration)
+            vol = basic_risk['current_volatility']
+            v0 = vol**2
+            kappa = 2.0        # Mean reversion speed
+            theta = 0.04       # Long-term variance (20% vol)
+            sigma_v = 0.3      # Volatility of volatility
+            rho = -0.7         # Correlation (typically negative)
+
+            # Calculate option prices using different models for comparison
+            T = 30/365  # 30-day options
+            K = current_price  # At-the-money
+
+            bs_call = self.black_scholes_call(current_price, K, T, self.risk_free_rate, vol)
+            merton_call = self.merton_jump_diffusion_price(
+                current_price, K, T, self.risk_free_rate, vol,
+                lambda_jump, mu_jump, sigma_jump, 'call'
+            )
+            heston_call = self.heston_model_price(
+                current_price, K, T, self.risk_free_rate,
+                v0, kappa, theta, sigma_v, rho, 'call'
+            )
+
+            # Model comparison
+            merton_premium = (merton_call - bs_call) / bs_call * 100 if bs_call > 0 else 0
+            heston_premium = (heston_call - bs_call) / bs_call * 100 if bs_call > 0 else 0
+
+            return {
+                **basic_risk,  # Include all basic risk metrics
+                'advanced_var_measures': {
+                    'var_95_1day': var_95,
+                    'var_99_1day': var_99,
+                    'cvar_95_1day': cvar_95,
+                    'cvar_99_1day': cvar_99,
+                    'var_95_pct': var_95 * 100,  # As percentage
+                    'cvar_95_pct': cvar_95 * 100
+                },
+                'risk_ratios': risk_ratios,
+                'model_comparison': {
+                    'black_scholes_call': bs_call,
+                    'merton_jump_call': merton_call,
+                    'heston_call': heston_call,
+                    'merton_premium_pct': merton_premium,
+                    'heston_premium_pct': heston_premium
+                },
+                'model_parameters': {
+                    'jump_intensity': lambda_jump,
+                    'expected_jump_size': mu_jump,
+                    'jump_volatility': sigma_jump,
+                    'vol_mean_reversion': kappa,
+                    'long_term_vol': np.sqrt(theta),
+                    'vol_of_vol': sigma_v,
+                    'stock_vol_correlation': rho
+                },
+                'risk_interpretation': self._interpret_comprehensive_risk(
+                    var_95, cvar_95, risk_ratios, merton_premium, heston_premium
+                )
+            }
+
+        except Exception as e:
+            return {
+                'error': f"Comprehensive risk analysis failed: {str(e)}",
+                'fallback_analysis': self.analyze_stock_risk(stock_data, window)
+            }
+
+    def _interpret_comprehensive_risk(self, var_95, cvar_95, risk_ratios, merton_premium, heston_premium):
+        """Interpret comprehensive risk analysis results."""
+        interpretation = []
+
+        # VaR interpretation
+        if var_95 > 0.05:  # More than 5% daily VaR
+            interpretation.append("🚨 HIGH DAILY RISK: Expected 1-day loss >5% with 5% probability")
+        elif var_95 > 0.03:
+            interpretation.append("⚠️ MODERATE DAILY RISK: Expected 1-day loss 3-5% with 5% probability")
+        else:
+            interpretation.append("✅ LOW DAILY RISK: Expected 1-day loss <3% with 5% probability")
+
+        # CVaR interpretation
+        if cvar_95 > var_95 * 1.5:
+            interpretation.append("⚠️ SIGNIFICANT TAIL RISK: Losses beyond VaR are much larger")
+        else:
+            interpretation.append("✅ MODERATE TAIL RISK: Losses beyond VaR are manageable")
+
+        # Sharpe ratio interpretation
+        sharpe = risk_ratios['sharpe_ratio']
+        if sharpe > 1.5:
+            interpretation.append("🌟 EXCELLENT RISK-ADJUSTED RETURNS")
+        elif sharpe > 1.0:
+            interpretation.append("✅ GOOD RISK-ADJUSTED RETURNS")
+        elif sharpe > 0.5:
+            interpretation.append("📊 MODERATE RISK-ADJUSTED RETURNS")
+        else:
+            interpretation.append("❌ POOR RISK-ADJUSTED RETURNS")
+
+        # Jump risk interpretation
+        if abs(merton_premium) > 5:
+            interpretation.append("⚡ SIGNIFICANT JUMP RISK: Options price notably higher due to crash risk")
+        elif abs(merton_premium) > 2:
+            interpretation.append("⚡ MODERATE JUMP RISK: Some premium for sudden price movements")
+        else:
+            interpretation.append("✅ LOW JUMP RISK: Minimal crash/spike risk premium")
+
+        # Volatility clustering interpretation
+        if abs(heston_premium) > 3:
+            interpretation.append("📊 STRONG VOLATILITY CLUSTERING: Vol tends to persist at levels")
+        elif abs(heston_premium) > 1:
+            interpretation.append("📊 MODERATE VOLATILITY CLUSTERING")
+        else:
+            interpretation.append("📊 LOW VOLATILITY CLUSTERING: More stable volatility")
+
+        return interpretation
+
     def analyze_stock_risk(self, stock_data, window=30):
         """
         Analyze stock risk metrics using Black-Scholes framework.
@@ -176,11 +524,9 @@ class OptionsAnalyzer:
             # MultiIndex columns - get the ticker from the first column
             ticker_name = stock_data.columns[0][1] if stock_data.columns[0][1] else list(stock_data.columns)[0][1]
             close_col = ('Close', ticker_name)
-            print(f"DEBUG: analyze_stock_risk using MultiIndex columns - ticker: {ticker_name}")
         else:
             # Simple column names
             close_col = 'Close'
-            print(f"DEBUG: analyze_stock_risk using simple column names")
 
         # Calculate returns and volatility
         returns = stock_data[close_col].pct_change().dropna()
@@ -300,14 +646,12 @@ class OptionsAnalyzer:
                     'recommendations': []
                 }
 
-            print(f"DEBUG: Options analysis for {ticker} - stock_data shape: {stock_data.shape}")
 
             # Calculate implied volatility from historical data
             returns = stock_data['Close'].pct_change().dropna()
             volatility = float(returns.std() * np.sqrt(252))  # Annualized volatility
             current_price = float(stock_data['Close'].iloc[-1])
 
-            print(f"DEBUG: Calculated volatility: {volatility}, current_price: {current_price}")
 
             # Time to expiration options (30, 60, 90 days)
             expiration_days = [30, 60, 90]
@@ -349,13 +693,12 @@ class OptionsAnalyzer:
                                 if hasattr(x, 'item') and not isinstance(x, (bytes, str)):
                                     try:
                                         x = x.item()
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        warnings.warn(f"Warning: Unable to convert numpy/pandas item to scalar - {str(e)}")
                                 if isinstance(x, pd.Series):
                                     x = x.iloc[-1]
                                 return float(x)
                             except Exception as err:
-                                print(f"DEBUG: _scalar failed for {lbl}: {err}; defaulting to 0.0")
                                 return 0.0
 
                         option_data = {
@@ -374,23 +717,26 @@ class OptionsAnalyzer:
                         }
                         options_analysis.append(option_data)
                     except Exception as opt_build_err:
-                        print(f"DEBUG: Failed building option_data for strike {strike}: {opt_build_err}")
                         options_analysis.append({'expiration_days': int(days), 'strike': float(strike) if not isinstance(strike, (list, tuple, pd.Series)) else 0.0, 'error': f'build_failed: {opt_build_err}'})
 
-            # Generate strategy recommendations
-            print("DEBUG: About to call analyze_stock_risk")
-            risk_analysis = self.analyze_stock_risk(stock_data)
-            print(f"DEBUG: analyze_stock_risk completed, result keys: {list(risk_analysis.keys()) if isinstance(risk_analysis, dict) else type(risk_analysis)}")
+            # Generate strategy recommendations using comprehensive risk analysis
+            risk_analysis = self.comprehensive_risk_analysis(stock_data)
 
-            print("DEBUG: About to call _generate_options_strategies")
             strategies = self._generate_options_strategies(current_price, volatility, risk_analysis)
-            print("DEBUG: _generate_options_strategies completed")
 
             return {
                 'ticker': ticker,
                 'current_price': float(np.round(float(current_price), 2)),
                 'implied_volatility': float(np.round(float(volatility) * 100, 2)),
-                'risk_assessment': risk_analysis.get('risk_level', 'Unknown'),
+                'risk_assessment': risk_analysis.get('risk_assessment', 'Unknown'),
+                'comprehensive_risk': {
+                    'var_95_daily': f"{risk_analysis.get('advanced_var_measures', {}).get('var_95_pct', 0):.2f}%",
+                    'cvar_95_daily': f"{risk_analysis.get('advanced_var_measures', {}).get('cvar_95_pct', 0):.2f}%",
+                    'sharpe_ratio': round(risk_analysis.get('risk_ratios', {}).get('sharpe_ratio', 0), 3),
+                    'sortino_ratio': round(risk_analysis.get('risk_ratios', {}).get('sortino_ratio', 0), 3),
+                    'model_comparison': risk_analysis.get('model_comparison', {}),
+                    'risk_interpretation': risk_analysis.get('risk_interpretation', [])
+                },
                 'options_prices': options_analysis,
                 'recommended_strategies': strategies,
                 'analysis_timestamp': datetime.now().isoformat()
@@ -482,9 +828,6 @@ class InvestmentAdvisor:
         Returns:
             dict: Investment suggestion with reasoning
         """
-        print(f"DEBUG: Investment advice method called with stock_data type: {type(stock_data)}")
-        print(f"DEBUG: stock_data shape: {stock_data.shape if hasattr(stock_data, 'shape') else 'No shape'}")
-        print(f"DEBUG: stock_data columns: {list(stock_data.columns)}")
 
         # Handle MultiIndex columns - get the first ticker if present
         if hasattr(stock_data.columns, 'nlevels') and stock_data.columns.nlevels > 1:
@@ -492,15 +835,12 @@ class InvestmentAdvisor:
             ticker_name = stock_data.columns[0][1] if stock_data.columns[0][1] else list(stock_data.columns)[0][1]
             close_col = ('Close', ticker_name)
             volume_col = ('Volume', ticker_name)
-            print(f"DEBUG: Using MultiIndex columns - ticker: {ticker_name}")
         else:
             # Simple column names
             close_col = 'Close'
             volume_col = 'Volume'
-            print(f"DEBUG: Using simple column names")
 
         if stock_data is None:
-            print("DEBUG: stock_data is None")
             return {
                 'suggestion': 'HOLD',
                 'confidence': 'LOW',
@@ -508,14 +848,11 @@ class InvestmentAdvisor:
                 'risk_level': 'UNKNOWN'
             }
 
-        print(f"DEBUG: About to check len(stock_data) - type: {type(stock_data)}")
 
         # Check data length carefully to avoid Series boolean issues
         try:
             data_length = len(stock_data)
-            print(f"DEBUG: data_length = {data_length}")
         except Exception as e:
-            print(f"DEBUG: Error getting length: {e}")
             return {
                 'suggestion': 'HOLD',
                 'confidence': 'LOW',
@@ -532,7 +869,6 @@ class InvestmentAdvisor:
             }
 
         try:
-            print("DEBUG: Starting investment suggestion analysis")
 
             # Helper to coerce any pandas/NumPy object to a float safely
             def _to_float(value, default=0.0, label=""):
@@ -543,8 +879,8 @@ class InvestmentAdvisor:
                         # numpy scalar or 0-d array
                         try:
                             value = value.item()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            warnings.warn(f"Warning: Unable to convert pandas item to scalar - {str(e)}")
                     if isinstance(value, (pd.Series, pd.DataFrame)):
                         # Take last value if Series, else default
                         if isinstance(value, pd.Series) and len(value) > 0:
@@ -553,7 +889,6 @@ class InvestmentAdvisor:
                             return float(default)
                     return float(value)
                 except Exception as conv_err:
-                    print(f"DEBUG: _to_float conversion failed for {label}: {conv_err}; using default {default}")
                     return float(default)
 
             # Early sanity checks to catch ambiguous Series boolean usage
@@ -563,7 +898,6 @@ class InvestmentAdvisor:
             }
             for name, candidate in ambiguous_candidates.items():
                 if candidate is not None:
-                    print(f"DEBUG: WARNING - {name} is a pandas Series; converting to dict")
                     try:
                         if isinstance(candidate, pd.Series):
                             if candidate.index.is_unique:
@@ -575,63 +909,50 @@ class InvestmentAdvisor:
                             else:
                                 risk_analysis = converted
                     except Exception as conv_ser_err:
-                        print(f"DEBUG: Failed to convert {name} Series to dict: {conv_ser_err}")
+                        warnings.warn(f"Warning: Failed to convert risk analysis data - {str(conv_ser_err)}")  # Continue with original data if conversion fails
 
             # Initialize scoring system
             buy_signals = 0
             sell_signals = 0
             risk_factors = []
 
-            print("DEBUG: Calculating technical indicators")
             # Technical Analysis
             current_price = float(stock_data[close_col].iloc[-1])
             sma_20 = float(stock_data[close_col].rolling(20).mean().iloc[-1])
             sma_50 = float(stock_data[close_col].rolling(50).mean().iloc[-1]) if len(stock_data) >= 50 else sma_20
-            print(f"DEBUG: current_price={current_price}, sma_20={sma_20}, sma_50={sma_50}")
 
             # Price momentum
             try:
-                print("DEBUG: Evaluating price momentum vs SMA20")
                 cond1 = float(current_price) > float(sma_20)
-                print(f"DEBUG: cond1 (current > sma20) = {cond1}")
                 if cond1:
                     buy_signals += 1
                 else:
                     sell_signals += 1
             except Exception as pm_err1:
-                print(f"DEBUG: Price momentum SMA20 error: {pm_err1}")
+                warnings.warn(f"Warning: Failed to compare current price with SMA-20 - {str(pm_err1)}")  # Continue with defaults if comparison fails
 
             try:
-                print("DEBUG: Evaluating price momentum vs SMA50")
                 cond2 = float(current_price) > float(sma_50)
-                print(f"DEBUG: cond2 (current > sma50) = {cond2}")
                 if cond2:
                     buy_signals += 1
                 else:
                     sell_signals += 1
             except Exception as pm_err2:
-                print(f"DEBUG: Price momentum SMA50 error: {pm_err2}")
-
-            print(f"DEBUG: After price momentum - buy_signals={buy_signals}, sell_signals={sell_signals}")
+                warnings.warn(f"Warning: Failed to compare current price with SMA-50 - {str(pm_err2)}")  # Continue with defaults if comparison fails
 
             # Volatility analysis
             returns = stock_data[close_col].pct_change().dropna()
             try:
                 recent_volatility = _to_float(returns.tail(20).std() * np.sqrt(252), default=0.0, label="recent_volatility")
             except Exception as rv_err:
-                print(f"DEBUG: recent_volatility computation failed: {rv_err}")
                 recent_volatility = 0.0
 
-            # Risk analysis integration
-            print(f"DEBUG: risk_analysis type: {type(risk_analysis)} value preview: {str(risk_analysis)[:120] if risk_analysis is not None else 'None'}")
+            # Enhanced risk analysis integration
             try:
-                print("DEBUG: Checking risk_analysis truthiness")
                 risk_dict_cond = isinstance(risk_analysis, dict) and len(risk_analysis) > 0
                 if not risk_dict_cond:
                     risk_dict_cond = isinstance(risk_analysis, pd.Series) and len(risk_analysis) > 0
-                print(f"DEBUG: risk_dict_cond = {risk_dict_cond}")
             except Exception as ra_eval_err:
-                print(f"DEBUG: risk_analysis evaluation error: {ra_eval_err}")
                 risk_dict_cond = False
 
             if risk_dict_cond:
@@ -646,9 +967,41 @@ class InvestmentAdvisor:
                 if isinstance(vol_percentile, pd.Series):
                     vol_percentile = float(vol_percentile.iloc[0]) if len(vol_percentile) > 0 else 50
 
+                # Process comprehensive risk measures
+                advanced_var = risk_analysis.get('advanced_var_measures', {})
+                risk_ratios = risk_analysis.get('risk_ratios', {})
+                model_comparison = risk_analysis.get('model_comparison', {})
+                risk_interpretation = risk_analysis.get('risk_interpretation', [])
+
                 risk_factors.append(f"Risk Level: {risk_level}")
 
-                # High volatility might indicate opportunity or danger
+                # VaR-based signals
+                var_95_pct = advanced_var.get('var_95_pct', 0)
+                cvar_95_pct = advanced_var.get('cvar_95_pct', 0)
+
+                if var_95_pct > 5:  # High daily VaR
+                    sell_signals += 1
+                    risk_factors.append(f"High VaR: {var_95_pct:.1f}% daily risk")
+                elif var_95_pct < 2:  # Low daily VaR
+                    buy_signals += 1
+                    risk_factors.append(f"Low VaR: {var_95_pct:.1f}% daily risk")
+
+                # Sharpe ratio signals
+                sharpe_ratio = risk_ratios.get('sharpe_ratio', 0)
+                if sharpe_ratio > 1.0:
+                    buy_signals += 1
+                    risk_factors.append(f"Strong risk-adjusted returns (Sharpe: {sharpe_ratio:.2f})")
+                elif sharpe_ratio < 0:
+                    sell_signals += 1
+                    risk_factors.append(f"Poor risk-adjusted returns (Sharpe: {sharpe_ratio:.2f})")
+
+                # Jump risk signals
+                merton_premium = model_comparison.get('merton_premium_pct', 0)
+                if abs(merton_premium) > 5:
+                    sell_signals += 1
+                    risk_factors.append(f"High jump risk premium: {merton_premium:.1f}%")
+
+                # Traditional volatility signals
                 if vol_percentile > 80:
                     sell_signals += 1
                     risk_factors.append("Very high volatility (top 20%)")
@@ -656,14 +1009,14 @@ class InvestmentAdvisor:
                     buy_signals += 1
                     risk_factors.append("Low volatility environment")
 
+                # Add risk interpretation insights
+                for insight in risk_interpretation[:2]:  # Include top 2 insights
+                    risk_factors.append(insight)
+
             # Pattern analysis integration
-            print(f"DEBUG: pattern_analysis type: {type(pattern_analysis)} value preview: {str(pattern_analysis)[:120] if pattern_analysis is not None else 'None'}")
             try:
-                print("DEBUG: Checking pattern_analysis truthiness")
                 pattern_dict_cond = isinstance(pattern_analysis, dict) and len(pattern_analysis) > 0
-                print(f"DEBUG: pattern_dict_cond = {pattern_dict_cond}")
             except Exception as pa_eval_err:
-                print(f"DEBUG: pattern_analysis evaluation error: {pa_eval_err}")
                 pattern_dict_cond = False
 
             if pattern_dict_cond:
@@ -689,12 +1042,10 @@ class InvestmentAdvisor:
             # Volume analysis - use safe column checking for MultiIndex
             try:
                 has_volume_col = any(volume_col == col for col in stock_data.columns)
-                print(f"DEBUG: Volume column check - has_volume_col: {has_volume_col}")
 
                 if has_volume_col:
                     avg_volume = float(stock_data[volume_col].tail(20).mean())
                     recent_volume = float(stock_data[volume_col].tail(5).mean())
-                    print(f"DEBUG: Volume analysis - avg_volume: {avg_volume}, recent_volume: {recent_volume}")
 
                     if recent_volume > avg_volume * 1.5:
                         # High volume could support the current trend
@@ -702,12 +1053,10 @@ class InvestmentAdvisor:
                             buy_signals += 1
                         else:
                             sell_signals += 1
-                        print(f"DEBUG: High volume detected, signals updated")
                 else:
-                    print(f"DEBUG: Volume column not found in: {list(stock_data.columns)}")
+                    warnings.warn("Warning: Volume not significantly elevated compared to average")
             except Exception as vol_error:
-                print(f"DEBUG: Volume analysis error: {vol_error}")
-                # Continue without volume analysis
+                warnings.warn(f"Warning: Failed to analyze volume patterns - {str(vol_error)}")  # Continue without volume analysis
 
             # RSI-like momentum indicator
             price_changes = stock_data[close_col].diff().tail(14)
@@ -770,9 +1119,36 @@ class InvestmentAdvisor:
                     suggestion = 'HOLD'
                     confidence = 'MEDIUM'
 
-            # Determine overall risk level
+            # Enhanced overall risk assessment
             if isinstance(risk_analysis, dict) and len(risk_analysis) > 0:
                 overall_risk = risk_analysis.get('risk_assessment', 'MODERATE')
+
+                # Adjust risk level based on comprehensive metrics
+                advanced_var = risk_analysis.get('advanced_var_measures', {})
+                risk_ratios = risk_analysis.get('risk_ratios', {})
+
+                var_95_pct = advanced_var.get('var_95_pct', 0)
+                sharpe_ratio = risk_ratios.get('sharpe_ratio', 0)
+                max_drawdown = abs(risk_ratios.get('max_drawdown', 0))
+
+                # Risk escalation factors
+                risk_escalations = 0
+                if var_95_pct > 5:  # High VaR
+                    risk_escalations += 1
+                if sharpe_ratio < 0:  # Negative risk-adjusted returns
+                    risk_escalations += 1
+                if max_drawdown > 0.2:  # Large historical drawdowns
+                    risk_escalations += 1
+
+                # Adjust risk level
+                if risk_escalations >= 2:
+                    if 'HIGH' not in overall_risk:
+                        overall_risk = 'VERY HIGH'
+                elif risk_escalations == 1:
+                    if overall_risk == 'LOW':
+                        overall_risk = 'MODERATE'
+                    elif overall_risk == 'MODERATE':
+                        overall_risk = 'HIGH'
             else:
                 if recent_volatility > 0.3:
                     overall_risk = 'HIGH'
