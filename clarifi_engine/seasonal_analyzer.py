@@ -113,13 +113,13 @@ class SeasonalAnalyzer:
 
             if len(month_data) > 0:
                 monthly_stats[month_name] = {
-                    'avg_return': month_data.mean(),
-                    'median_return': month_data.median(),
-                    'volatility': month_data.std(),
-                    'win_rate': (month_data > 0).mean() * 100,
-                    'best_return': month_data.max(),
-                    'worst_return': month_data.min(),
-                    'observations': len(month_data)
+                    'avg_return': float(month_data.mean()),
+                    'median_return': float(month_data.median()),
+                    'volatility': float(month_data.std()),
+                    'win_rate': float((month_data > 0).mean() * 100),
+                    'best_return': float(month_data.max()),
+                    'worst_return': float(month_data.min()),
+                    'observations': int(len(month_data))
                 }
             else:
                 monthly_stats[month_name] = {
@@ -160,11 +160,11 @@ class SeasonalAnalyzer:
 
             if effects:
                 holiday_effects[holiday_name] = {
-                    'avg_pre_effect': np.mean([e['pre_return'] for e in effects]),
-                    'avg_post_effect': np.mean([e['post_return'] for e in effects]),
-                    'avg_total_effect': np.mean([e['total_return'] for e in effects]),
-                    'consistency': np.mean([e['total_return'] > 0 for e in effects]) * 100,
-                    'occurrences': len(effects)
+                    'avg_pre_effect': float(np.mean([e['pre_return'] for e in effects])),
+                    'avg_post_effect': float(np.mean([e['post_return'] for e in effects])),
+                    'avg_total_effect': float(np.mean([e['total_return'] for e in effects])),
+                    'consistency': float(np.mean([e['total_return'] > 0 for e in effects]) * 100),
+                    'occurrences': int(len(effects))
                 }
             else:
                 holiday_effects[holiday_name] = {
@@ -198,9 +198,9 @@ class SeasonalAnalyzer:
                 return None
 
             # Calculate returns
-            pre_return = pre_holiday_data['Return'].tail(3).sum()  # 3 days before
-            post_return = post_holiday_data['Return'].head(3).sum()  # 3 days after
-            total_return = pre_return + post_return
+            pre_return = float(pre_holiday_data['Return'].tail(3).sum())  # 3 days before
+            post_return = float(post_holiday_data['Return'].head(3).sum())  # 3 days after
+            total_return = float(pre_return + post_return)
 
             return {
                 'pre_return': pre_return,
@@ -220,10 +220,10 @@ class SeasonalAnalyzer:
             return 0.0
 
         # Normalize the variance to a 0-1 score
-        variance = np.var(monthly_returns)
+        variance = float(np.var(monthly_returns))
         max_possible_variance = 0.01  # Assume max 1% daily variance between months
 
-        bias_score = min(variance / max_possible_variance, 1.0)
+        bias_score = float(min(variance / max_possible_variance, 1.0))
         return bias_score
 
     def _identify_best_worst_months(self, monthly_stats: Dict[str, Dict[str, float]]) -> Tuple[List[str], List[str]]:

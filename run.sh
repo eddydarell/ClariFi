@@ -70,4 +70,5 @@ fi
 cd "$SCRIPT_DIR" || exit 1
 
 # Run the Python script with all arguments
-"$PYTHON_ENV" main.py "$@"
+# "$PYTHON_ENV" main.py "$@"
+"$PYTHON_ENV" clarifi_engine/main.py "$@"

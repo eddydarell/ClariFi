@@ -1,53 +1,65 @@
-# 🚀 ClariFi: Clarify your Finances
+# ClariFi - Clarify your Finances 📈
 
-## Advanced Market Intelligence & Pattern Analysis Tool
+An advanced financial analysis platform that combines machine learning, pattern recognition, and real-time market data to provide comprehensive investment insights.
 
-A sophisticated financial analysis system that provides deep insights into stock patterns, correlations, event impacts, seasonal trends, options pricing, and investment recommendations to help clarify your financial decisions and make informed investments.
+## � Features
 
-## 💡 About ClariFi
+### Core Functionality
 
-ClariFi combines "Clarity" and "Finances" to deliver exactly what modern investors need: **clear, actionable insights** from complex financial data. Our tool transforms raw market data into understandable patterns and recommendations.
+- **📊 Comprehensive Stock Analysis**: Technical patterns, seasonal trends, event correlation
+- **⚖️ Options Analysis**: Advanced options strategies and risk assessment
+- **💼 Portfolio Management**: Create and track multiple investment portfolios
+- **🔍 Prediction vs Reality**: Compare AI predictions with actual market performance
+- **📈 Interactive Visualizations**: Advanced charts and graphs for data analysis
+- **🗄️ SQLite Database**: Persistent storage for portfolios, analysis results, and history
 
-## 🎯 Core Features
+### Web Interface
 
-### 📊 **Pattern Analysis**
+- **🌐 FastAPI Backend**: RESTful API for all operations
+- **💻 Modern Web UI**: Responsive interface built with HTML5/CSS3/JavaScript
+- **📱 Real-time Updates**: WebSocket support for live data streaming
+- **📊 Dashboard**: Overview of portfolios, analysis results, and performance metrics
 
-- **Correlation Detection**: Identify stocks that move together or in opposition
-- **Leading Indicators**: Find stocks that predict movements in others
-- **Volatility Clustering**: Detect periods of high/low volatility grouping
-- **Support/Resistance**: Automatically identify key price levels
-- **Trend Strength**: Analyze momentum and trend reliability
+### Database Features
 
-### 📰 **Event Correlation**
+- **Portfolio Management**: Store multiple portfolios with tickers and positions
+- **Analysis History**: Track all analysis results with versioning
+- **Command Logging**: Complete audit trail of all operations
+- **Comparison Results**: Store prediction accuracy for model refinement
+- **Performance Metrics**: Track accuracy trends over time
 
-- **Major Event Impact**: Correlate market movements with world events
-- **Unusual Movement Detection**: Identify unexplained large price swings
-- **Event Timeline**: Track how events affect different stocks over time
-- **Custom Events**: Add your own events for analysis
+## 🛠️ Installation
 
-### ⚖️ **Options & Risk Analysis** (NEW)
+### Prerequisites
 
-- **Black-Scholes Pricing**: Full implementation of the Black-Scholes equation for options pricing
-- **Greeks Calculation**: Delta, Gamma, Theta, Vega, and Rho for risk assessment
-- **Implied Volatility**: Calculate IV from market prices using Newton-Raphson method
-- **Risk Assessment**: Comprehensive volatility analysis and risk level determination
-- **Expected Moves**: Predict price movement ranges for different timeframes
+- Python 3.8+
+- pip package manager
 
-### 🗓️ **Seasonal Analysis** (NEW)
+### Quick Start
 
-- **Monthly Pattern Detection**: Identify best and worst performing months for each stock
-- **Holiday Effects**: Track performance around major holidays (New Year, Christmas, Thanksgiving, etc.)
-- **Seasonal Bias Scoring**: Quantify how seasonal a stock's behavior is
-- **Current Timing Analysis**: Get recommendations for optimal entry/exit times
-- **Business Cycle Integration**: Perfect for sector-specific seasonal trends (retail, energy, agriculture)
+1. **Clone/Navigate to ClariFi directory**
 
-### 💰 **Investment Advisory** (NEW)
+   ```bash
+   cd /path/to/ClariFi
+   ```
 
-- **BUY/SELL/HOLD Recommendations**: Clear, actionable investment suggestions
-- **Confidence Levels**: HIGH/MEDIUM/LOW confidence ratings for each recommendation
-- **Portfolio Analysis**: Portfolio-level risk assessment and diversification analysis
-- **Signal Integration**: Combines technical, fundamental, and options analysis
-- **Risk-Adjusted Advice**: Recommendations account for individual risk tolerance
+2. **Run the launcher script**
+
+   ```bash
+   chmod +x start_clarifi.sh
+   ./start_clarifi.sh
+   ```
+
+3. **Or run manually**
+
+   ```bash
+   pip install -r requirements.txt
+   python3 run_clarifi.py
+   ```
+
+4. **Access the application**
+   - Web Interface: <http://localhost:8000>
+   - API Documentation: <http://localhost:8000/docs>
 
 ### �🔬 **Advanced Analytics**
 
@@ -88,15 +100,18 @@ ClariFi/
 ### Quick Start
 
 1. **Initialize Environment** (One-time setup):
+
    ```bash
    ./run.sh init
    ```
+
    This will:
    - Create a virtual environment at `/Users/eddyntambwe/Dev/scripts-project/venv`
    - Install all required Python packages
    - Set up the environment for immediate use
 
 2. **Verify Installation**:
+
    ```bash
    ./run.sh --help
    ```
@@ -106,17 +121,20 @@ ClariFi/
 If you prefer manual setup:
 
 1. **Create Virtual Environment**:
+
    ```bash
    python3 -m venv /Users/eddyntambwe/Dev/scripts-project/venv
    source /Users/eddyntambwe/Dev/scripts-project/venv/bin/activate
    ```
 
 2. **Install Required Packages**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Verify Installation**:
+
    ```bash
    python main.py --help
    ```
@@ -124,6 +142,7 @@ If you prefer manual setup:
 ### Dependencies
 
 The tool requires these Python packages:
+
 - `yfinance>=0.2.18` - Yahoo Finance data
 - `matplotlib>=3.7.0` - Charting and visualization
 - `seaborn>=0.12.0` - Statistical visualization

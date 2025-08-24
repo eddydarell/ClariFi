@@ -254,6 +254,159 @@ class OptionsAnalyzer:
         else:
             return "Very Low Risk"
 
+    def analyze_options(self, ticker, stock_data=None):
+        """
+        Comprehensive options analysis for a given ticker.
+
+        Args:
+            ticker (str): Stock ticker symbol
+            stock_data (pd.DataFrame, optional): Stock price data
+
+        Returns:
+            dict: Options analysis results
+        """
+        try:
+            # If no stock data provided, use basic analysis
+            if stock_data is None or stock_data.empty:
+                return {
+                    'ticker': ticker,
+                    'analysis_type': 'basic_options',
+                    'message': 'Options analysis requires stock price data',
+                    'recommendations': []
+                }
+
+            current_price = stock_data['Close'].iloc[-1]
+            volatility = stock_data['Close'].pct_change().std() * np.sqrt(252)  # Annualized volatility
+
+            # Time to expiration options (30, 60, 90 days)
+            expiration_days = [30, 60, 90]
+            options_analysis = []
+
+            for days in expiration_days:
+                T = days / 365.0  # Convert to years
+
+                # Strike prices around current price
+                strikes = [
+                    current_price * 0.95,  # 5% OTM put
+                    current_price,         # ATM
+                    current_price * 1.05   # 5% OTM call
+                ]
+
+                for strike in strikes:
+                    # Calculate call and put prices
+                    call_price = self.black_scholes_call(
+                        current_price, strike, T, self.risk_free_rate, volatility
+                    )
+                    put_price = self.black_scholes_put(
+                        current_price, strike, T, self.risk_free_rate, volatility
+                    )
+
+                    # Calculate Greeks
+                    call_greeks = self.calculate_greeks(
+                        current_price, strike, T, self.risk_free_rate, volatility, 'call'
+                    )
+                    put_greeks = self.calculate_greeks(
+                        current_price, strike, T, self.risk_free_rate, volatility, 'put'
+                    )
+
+                    option_data = {
+                        'expiration_days': days,
+                        'strike': round(strike, 2),
+                        'current_price': round(current_price, 2),
+                        'call_price': round(call_price, 2),
+                        'put_price': round(put_price, 2),
+                        'call_delta': round(call_greeks['delta'], 4),
+                        'call_gamma': round(call_greeks['gamma'], 4),
+                        'call_theta': round(call_greeks['theta'], 4),
+                        'put_delta': round(put_greeks['delta'], 4),
+                        'put_gamma': round(put_greeks['gamma'], 4),
+                        'put_theta': round(put_greeks['theta'], 4),
+                        'volatility': round(volatility * 100, 2)  # As percentage
+                    }
+
+                    options_analysis.append(option_data)
+
+            # Generate strategy recommendations
+            risk_analysis = self.analyze_stock_risk(stock_data)
+            strategies = self._generate_options_strategies(current_price, volatility, risk_analysis)
+
+            return {
+                'ticker': ticker,
+                'current_price': round(current_price, 2),
+                'implied_volatility': round(volatility * 100, 2),
+                'risk_assessment': risk_analysis.get('risk_level', 'Unknown'),
+                'options_prices': options_analysis,
+                'recommended_strategies': strategies,
+                'analysis_timestamp': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            return {
+                'ticker': ticker,
+                'error': f"Options analysis failed: {str(e)}",
+                'analysis_timestamp': datetime.now().isoformat()
+            }
+
+    def _generate_options_strategies(self, current_price, volatility, risk_analysis):
+        """
+        Generate recommended options strategies based on analysis.
+
+        Args:
+            current_price (float): Current stock price
+            volatility (float): Implied volatility
+            risk_analysis (dict): Risk analysis results
+
+        Returns:
+            list: List of recommended strategies
+        """
+        strategies = []
+        risk_level = risk_analysis.get('risk_level', 'Unknown')
+
+        # High volatility strategies
+        if volatility > 0.3:  # 30% volatility
+            strategies.append({
+                'strategy': 'Short Straddle',
+                'description': 'Sell both call and put at ATM to profit from volatility decline',
+                'risk': 'High',
+                'market_outlook': 'Neutral with volatility decrease'
+            })
+
+        # Low volatility strategies
+        elif volatility < 0.15:  # 15% volatility
+            strategies.append({
+                'strategy': 'Long Straddle',
+                'description': 'Buy both call and put at ATM to profit from volatility increase',
+                'risk': 'Medium',
+                'market_outlook': 'Neutral with volatility increase'
+            })
+
+        # Medium volatility strategies
+        else:
+            strategies.append({
+                'strategy': 'Iron Condor',
+                'description': 'Sell call spread and put spread to profit from range-bound movement',
+                'risk': 'Medium',
+                'market_outlook': 'Neutral within range'
+            })
+
+        # Risk-based strategies
+        if risk_level in ['High Risk', 'Very High Risk']:
+            strategies.append({
+                'strategy': 'Protective Put',
+                'description': 'Buy put options to hedge against downside risk',
+                'risk': 'Low',
+                'market_outlook': 'Insurance against decline'
+            })
+        elif risk_level in ['Low Risk', 'Very Low Risk']:
+            strategies.append({
+                'strategy': 'Covered Call',
+                'description': 'Sell call options against stock holdings for income',
+                'risk': 'Low',
+                'market_outlook': 'Neutral to slightly bullish'
+            })
+
+        return strategies
+
 
 class InvestmentAdvisor:
     def __init__(self):
@@ -273,147 +426,132 @@ class InvestmentAdvisor:
         Returns:
             dict: Investment suggestion with reasoning
         """
-        if len(stock_data) < 20:
-            return {
-                'suggestion': 'HOLD',
-                'confidence': 'LOW',
-                'reasoning': 'Insufficient data for analysis',
-                'risk_level': 'UNKNOWN'
-            }
+        try:
+            if stock_data is None or stock_data.empty or len(stock_data) < 20:
+                return {
+                    'suggestion': 'HOLD',
+                    'confidence': 'LOW',
+                    'reasoning': 'Insufficient data for analysis',
+                    'risk_level': 'UNKNOWN'
+                }
 
-        # Initialize scoring system
-        buy_signals = 0
-        sell_signals = 0
-        risk_factors = []
+            buy_signals = 0
+            sell_signals = 0
+            risk_factors = []
 
-        # Technical Analysis
-        current_price = stock_data['Close'].iloc[-1]
-        sma_20 = stock_data['Close'].rolling(20).mean().iloc[-1]
-        sma_50 = stock_data['Close'].rolling(50).mean().iloc[-1] if len(stock_data) >= 50 else sma_20
+            current_price = float(stock_data['Close'].iloc[-1])
+            sma_20 = float(stock_data['Close'].rolling(20).mean().iloc[-1])
+            sma_50 = float(stock_data['Close'].rolling(50).mean().iloc[-1]) if len(stock_data) >= 50 else sma_20
 
-        # Price momentum
-        if current_price > sma_20:
-            buy_signals += 1
-        else:
-            sell_signals += 1
-
-        if current_price > sma_50:
-            buy_signals += 1
-        else:
-            sell_signals += 1
-
-        # Volatility analysis
-        returns = stock_data['Close'].pct_change().dropna()
-        recent_volatility = returns.tail(20).std() * np.sqrt(252)
-
-        # Risk analysis integration
-        if risk_analysis:
-            risk_level = risk_analysis.get('risk_assessment', 'Moderate Risk')
-            current_vol = risk_analysis.get('current_volatility', recent_volatility)
-            vol_percentile = risk_analysis.get('volatility_percentile', 50)
-
-            risk_factors.append(f"Risk Level: {risk_level}")
-
-            # High volatility might indicate opportunity or danger
-            if vol_percentile > 80:
-                sell_signals += 1
-                risk_factors.append("Very high volatility (top 20%)")
-            elif vol_percentile < 20:
+            if current_price > sma_20:
                 buy_signals += 1
-                risk_factors.append("Low volatility environment")
+            else:
+                sell_signals += 1
+            if current_price > sma_50:
+                buy_signals += 1
+            else:
+                sell_signals += 1
 
-        # Pattern analysis integration
-        if pattern_analysis:
-            # Check for trend patterns
-            if 'trend_strength' in pattern_analysis:
-                trend_strength = pattern_analysis['trend_strength']
-                if trend_strength > 0.6:
-                    buy_signals += 2
-                elif trend_strength < -0.6:
-                    sell_signals += 2
+            returns = stock_data['Close'].pct_change().dropna()
+            recent_volatility = float(returns.tail(20).std() * np.sqrt(252)) if len(returns) > 0 else 0.0
 
-        # Volume analysis
-        if 'Volume' in stock_data.columns:
-            avg_volume = stock_data['Volume'].tail(20).mean()
-            recent_volume = stock_data['Volume'].tail(5).mean()
-
-            if recent_volume > avg_volume * 1.5:
-                # High volume could support the current trend
-                if current_price > sma_20:
-                    buy_signals += 1
-                else:
+            if isinstance(risk_analysis, dict) and risk_analysis:
+                risk_level = risk_analysis.get('risk_assessment', 'Moderate Risk')
+                vol_percentile = risk_analysis.get('volatility_percentile', 50)
+                risk_factors.append(f"Risk Level: {risk_level}")
+                if vol_percentile > 80:
                     sell_signals += 1
+                    risk_factors.append("Very high volatility (top 20%)")
+                elif vol_percentile < 20:
+                    buy_signals += 1
+                    risk_factors.append("Low volatility environment")
 
-        # RSI-like momentum indicator
-        price_changes = stock_data['Close'].diff().tail(14)
-        gains = price_changes.where(price_changes > 0, 0).mean()
-        losses = -price_changes.where(price_changes < 0, 0).mean()
+            if isinstance(pattern_analysis, dict) and pattern_analysis.get('trend_strength') is not None:
+                ts = pattern_analysis.get('trend_strength')
+                try:
+                    ts = float(ts)
+                    if ts > 0.6:
+                        buy_signals += 2
+                    elif ts < -0.6:
+                        sell_signals += 2
+                except Exception:
+                    pass
 
-        if losses != 0:
-            rs = gains / losses
-            rsi = 100 - (100 / (1 + rs))
+            if 'Volume' in stock_data.columns:
+                avg_volume = float(stock_data['Volume'].tail(20).mean())
+                recent_volume = float(stock_data['Volume'].tail(5).mean())
+                if recent_volume > avg_volume * 1.5:
+                    if current_price > sma_20:
+                        buy_signals += 1
+                    else:
+                        sell_signals += 1
 
-            if rsi < 30:  # Oversold
+            price_changes = stock_data['Close'].diff().tail(14)
+            gains = price_changes.where(price_changes > 0, 0).mean()
+            losses = -price_changes.where(price_changes < 0, 0).mean()
+            if losses != 0:
+                rs = gains / losses
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 50
+            if rsi < 30:
                 buy_signals += 1
                 risk_factors.append("Potentially oversold (RSI < 30)")
-            elif rsi > 70:  # Overbought
+            elif rsi > 70:
                 sell_signals += 1
                 risk_factors.append("Potentially overbought (RSI > 70)")
 
-        # Final decision logic
-        total_signals = buy_signals + sell_signals
-        if total_signals == 0:
-            suggestion = 'HOLD'
-            confidence = 'LOW'
-        else:
-            buy_ratio = buy_signals / total_signals
-
-            if buy_ratio >= 0.7:
-                suggestion = 'BUY'
-                confidence = 'HIGH' if buy_ratio >= 0.8 else 'MEDIUM'
-            elif buy_ratio <= 0.3:
-                suggestion = 'SELL'
-                confidence = 'HIGH' if buy_ratio <= 0.2 else 'MEDIUM'
-            else:
+            total = buy_signals + sell_signals
+            if total == 0:
                 suggestion = 'HOLD'
-                confidence = 'MEDIUM'
-
-        # Determine overall risk level
-        if risk_analysis:
-            overall_risk = risk_analysis.get('risk_assessment', 'MODERATE')
-        else:
-            if recent_volatility > 0.3:
-                overall_risk = 'HIGH'
-            elif recent_volatility < 0.15:
-                overall_risk = 'LOW'
+                confidence = 'LOW'
             else:
-                overall_risk = 'MODERATE'
+                ratio = buy_signals / total
+                if ratio >= 0.7:
+                    suggestion = 'BUY'
+                    confidence = 'HIGH' if ratio >= 0.8 else 'MEDIUM'
+                elif ratio <= 0.3:
+                    suggestion = 'SELL'
+                    confidence = 'HIGH' if ratio <= 0.2 else 'MEDIUM'
+                else:
+                    suggestion = 'HOLD'
+                    confidence = 'MEDIUM'
 
-        # Build reasoning
-        reasoning_parts = [
-            f"Buy signals: {buy_signals}, Sell signals: {sell_signals}",
-            f"Current price vs SMA20: {'Above' if current_price > sma_20 else 'Below'}",
-            f"Recent volatility: {recent_volatility:.2%}"
-        ]
+            if isinstance(risk_analysis, dict) and risk_analysis:
+                overall_risk = risk_analysis.get('risk_assessment', 'MODERATE')
+            else:
+                if recent_volatility > 0.3:
+                    overall_risk = 'HIGH'
+                elif recent_volatility < 0.15:
+                    overall_risk = 'LOW'
+                else:
+                    overall_risk = 'MODERATE'
 
-        if risk_factors:
-            reasoning_parts.extend(risk_factors)
+            reasoning = [
+                f"Buy signals: {buy_signals}, Sell signals: {sell_signals}",
+                f"Current price vs SMA20: {'Above' if current_price > sma_20 else 'Below'}",
+                f"Recent volatility: {recent_volatility:.2%}"
+            ]
+            reasoning.extend(risk_factors)
 
-        result = {
-            'suggestion': suggestion,
-            'confidence': confidence,
-            'reasoning': '; '.join(reasoning_parts),
-            'risk_level': overall_risk,
-            'buy_signals': buy_signals,
-            'sell_signals': sell_signals,
-            'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
-
-        # Store in history
-        self.advice_history.append(result)
-
-        return result
-
+            result = {
+                'suggestion': suggestion,
+                'confidence': confidence,
+                'reasoning': '; '.join(reasoning),
+                'risk_level': overall_risk,
+                'buy_signals': buy_signals,
+                'sell_signals': sell_signals,
+                'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.advice_history.append(result)
+            return result
+        except Exception as e:
+            return {
+                'suggestion': 'HOLD',
+                'confidence': 'LOW',
+                'reasoning': f'Analysis error: {e}',
+                'risk_level': 'UNKNOWN'
+            }
     def get_portfolio_suggestions(self, portfolio_data, correlation_analysis=None):
         """
         Generate portfolio-level investment suggestions.
