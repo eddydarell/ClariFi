@@ -1157,6 +1157,10 @@ class InvestmentAdvisor:
                 else:
                     overall_risk = 'MODERATE'
 
+            # Calculate holding period suggestion and recovery forecast
+            holding_analysis = self.calculate_holding_period_suggestion(stock_data)
+            recovery_forecast = self.calculate_forecast_recovery_date(stock_data)
+
             # Build reasoning
             reasoning_parts = [
                 f"Buy signals: {buy_signals}, Sell signals: {sell_signals}",
@@ -1167,6 +1171,17 @@ class InvestmentAdvisor:
             if risk_factors:
                 reasoning_parts.extend(risk_factors)
 
+            # Add holding period insights to reasoning
+            if holding_analysis['confidence'] in ['HIGH', 'MEDIUM']:
+                reasoning_parts.append(f"Suggested holding period: {holding_analysis['suggested_holding_days']} days")
+
+            # Add recovery forecast insights
+            if recovery_forecast.get('is_currently_in_dip', False) and recovery_forecast.get('forecast_recovery_date'):
+                reasoning_parts.append(f"Expected recovery by: {recovery_forecast['forecast_recovery_date']}")
+            elif recovery_forecast.get('confidence') in ['HIGH', 'MEDIUM'] and recovery_forecast.get('recovery_statistics'):
+                avg_recovery = recovery_forecast['recovery_statistics'].get('average_days', 0)
+                reasoning_parts.append(f"Historical recovery pattern: {avg_recovery:.1f} days average")
+
             result = {
                 'suggestion': suggestion,
                 'confidence': confidence,
@@ -1174,7 +1189,9 @@ class InvestmentAdvisor:
                 'risk_level': overall_risk,
                 'buy_signals': buy_signals,
                 'sell_signals': sell_signals,
-                'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'analysis_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'holding_period_analysis': holding_analysis,
+                'recovery_forecast': recovery_forecast
             }
 
             # Store in history
@@ -1240,6 +1257,342 @@ class InvestmentAdvisor:
         }
 
         return portfolio_advice
+
+    def calculate_holding_period_suggestion(self, stock_data):
+        """
+        Calculate suggested holding period based on historical positive trends.
+
+        Args:
+            stock_data (pd.DataFrame): Stock price data
+
+        Returns:
+            dict: Holding period analysis with suggested duration
+        """
+        try:
+            # Handle MultiIndex columns
+            if hasattr(stock_data.columns, 'nlevels') and stock_data.columns.nlevels > 1:
+                close_col = ('Close', stock_data.columns[0][1]) if stock_data.columns[0][1] else list(stock_data.columns)[0]
+            else:
+                close_col = 'Close'
+
+            if len(stock_data) < 30:
+                return {
+                    'suggested_holding_days': 30,
+                    'confidence': 'LOW',
+                    'reasoning': 'Insufficient data for trend analysis',
+                    'historical_positive_streaks': []
+                }
+
+            # Calculate daily returns
+            prices = stock_data[close_col]
+            daily_returns = prices.pct_change().dropna()
+
+            # Find positive streaks (consecutive positive days)
+            positive_streaks = []
+            current_streak = 0
+
+            for return_val in daily_returns:
+                if return_val > 0:
+                    current_streak += 1
+                else:
+                    if current_streak > 0:
+                        positive_streaks.append(current_streak)
+                    current_streak = 0
+
+            # Add final streak if it ends positively
+            if current_streak > 0:
+                positive_streaks.append(current_streak)
+
+            if not positive_streaks:
+                return {
+                    'suggested_holding_days': 14,
+                    'confidence': 'LOW',
+                    'reasoning': 'No positive streaks found in historical data',
+                    'historical_positive_streaks': []
+                }
+
+            # Calculate statistics
+            avg_positive_streak = np.mean(positive_streaks)
+            max_positive_streak = max(positive_streaks)
+            median_positive_streak = np.median(positive_streaks)
+
+            # Calculate cumulative returns during positive periods
+            cumulative_positive_returns = []
+            streak_start = None
+            current_streak = 0
+
+            for i, return_val in enumerate(daily_returns):
+                if return_val > 0:
+                    if current_streak == 0:
+                        streak_start = i
+                    current_streak += 1
+                else:
+                    if current_streak > 0 and streak_start is not None:
+                        # Calculate cumulative return for this streak
+                        streak_returns = daily_returns.iloc[streak_start:i]
+                        cum_return = (1 + streak_returns).prod() - 1
+                        cumulative_positive_returns.append({
+                            'duration': current_streak,
+                            'cumulative_return': cum_return,
+                            'avg_daily_return': streak_returns.mean()
+                        })
+                    current_streak = 0
+                    streak_start = None
+
+            # Add final streak if it ends positively
+            if current_streak > 0 and streak_start is not None:
+                streak_returns = daily_returns.iloc[streak_start:]
+                cum_return = (1 + streak_returns).prod() - 1
+                cumulative_positive_returns.append({
+                    'duration': current_streak,
+                    'cumulative_return': cum_return,
+                    'avg_daily_return': streak_returns.mean()
+                })
+
+            # Determine optimal holding period based on historical performance
+            if cumulative_positive_returns:
+                # Find the duration that maximizes average cumulative return
+                avg_returns_by_duration = {}
+                for streak_data in cumulative_positive_returns:
+                    duration = streak_data['duration']
+                    if duration not in avg_returns_by_duration:
+                        avg_returns_by_duration[duration] = []
+                    avg_returns_by_duration[duration].append(streak_data['cumulative_return'])
+
+                # Calculate average return for each duration
+                duration_performance = {}
+                for duration, returns in avg_returns_by_duration.items():
+                    duration_performance[duration] = {
+                        'avg_return': np.mean(returns),
+                        'frequency': len(returns),
+                        'max_return': max(returns),
+                        'min_return': min(returns)
+                    }
+
+                # Find optimal duration (considering both return and frequency)
+                optimal_duration = max(duration_performance.keys(),
+                                     key=lambda d: duration_performance[d]['avg_return'] *
+                                                  min(duration_performance[d]['frequency'] / len(positive_streaks), 1.0))
+
+                suggested_holding = min(max(optimal_duration, 7), 90)  # Cap between 1 week and 3 months
+            else:
+                suggested_holding = int(median_positive_streak)
+
+            # Determine confidence level
+            if len(positive_streaks) >= 10 and avg_positive_streak >= 5:
+                confidence = 'HIGH'
+            elif len(positive_streaks) >= 5 and avg_positive_streak >= 3:
+                confidence = 'MEDIUM'
+            else:
+                confidence = 'LOW'
+
+            # Build reasoning
+            reasoning_parts = [
+                f"Historical analysis shows {len(positive_streaks)} positive streaks",
+                f"Average positive streak: {avg_positive_streak:.1f} days",
+                f"Longest streak: {max_positive_streak} days",
+                f"Median streak: {median_positive_streak:.1f} days"
+            ]
+
+            if cumulative_positive_returns:
+                avg_cum_return = np.mean([data['cumulative_return'] for data in cumulative_positive_returns])
+                reasoning_parts.append(f"Average cumulative return during positive periods: {avg_cum_return:.2%}")
+
+            return {
+                'suggested_holding_days': int(suggested_holding),
+                'confidence': confidence,
+                'reasoning': '; '.join(reasoning_parts),
+                'historical_positive_streaks': positive_streaks,
+                'streak_statistics': {
+                    'average': avg_positive_streak,
+                    'median': median_positive_streak,
+                    'maximum': max_positive_streak,
+                    'total_streaks': len(positive_streaks)
+                },
+                'cumulative_returns_analysis': cumulative_positive_returns[:5]  # Top 5 for summary
+            }
+
+        except Exception as e:
+            return {
+                'suggested_holding_days': 30,
+                'confidence': 'LOW',
+                'reasoning': f'Error in holding period analysis: {str(e)}',
+                'historical_positive_streaks': []
+            }
+
+    def calculate_forecast_recovery_date(self, stock_data):
+        """
+        Forecast when a ticker is expected to climb based on historical recovery patterns after dips.
+
+        Args:
+            stock_data (pd.DataFrame): Stock price data
+
+        Returns:
+            dict: Recovery forecast with expected date and confidence
+        """
+        try:
+            # Handle MultiIndex columns
+            if hasattr(stock_data.columns, 'nlevels') and stock_data.columns.nlevels > 1:
+                close_col = ('Close', stock_data.columns[0][1]) if stock_data.columns[0][1] else list(stock_data.columns)[0]
+            else:
+                close_col = 'Close'
+
+            if len(stock_data) < 50:
+                return {
+                    'forecast_recovery_date': None,
+                    'days_to_recovery': None,
+                    'confidence': 'LOW',
+                    'reasoning': 'Insufficient data for recovery pattern analysis',
+                    'historical_dip_recoveries': []
+                }
+
+            prices = stock_data[close_col]
+            daily_returns = prices.pct_change().dropna()
+
+            # Define dip as a decline of at least 5% from recent high
+            dip_threshold = -0.05
+            recovery_threshold = 0.02  # 2% gain from dip low
+
+            # Find dips and subsequent recoveries
+            recovery_patterns = []
+
+            # Rolling 20-day high to identify dips
+            rolling_high = prices.rolling(window=20, min_periods=1).max()
+
+            i = 20  # Start after initial rolling window
+            while i < len(prices) - 10:  # Leave room for recovery analysis
+                current_price = prices.iloc[i]
+                recent_high = rolling_high.iloc[i-1]
+
+                # Check if current price represents a dip
+                dip_magnitude = (current_price - recent_high) / recent_high
+
+                if dip_magnitude <= dip_threshold:
+                    # Found a dip, now look for recovery
+                    dip_price = current_price
+                    recovery_start_idx = i
+
+                    # Look for recovery in the next 30 days
+                    recovery_found = False
+                    for j in range(i + 1, min(i + 31, len(prices))):
+                        future_price = prices.iloc[j]
+                        recovery_magnitude = (future_price - dip_price) / dip_price
+
+                        if recovery_magnitude >= recovery_threshold:
+                            # Recovery found
+                            days_to_recovery = j - i
+                            recovery_patterns.append({
+                                'dip_date': prices.index[i],
+                                'recovery_date': prices.index[j],
+                                'dip_magnitude': dip_magnitude,
+                                'recovery_magnitude': recovery_magnitude,
+                                'days_to_recovery': days_to_recovery,
+                                'dip_price': dip_price,
+                                'recovery_price': future_price
+                            })
+                            recovery_found = True
+                            break
+
+                    # Skip ahead to avoid overlapping dips
+                    if recovery_found:
+                        i = j + 5  # Skip 5 days after recovery
+                    else:
+                        i += 10  # Skip ahead if no recovery found
+                else:
+                    i += 1
+
+            if not recovery_patterns:
+                return {
+                    'forecast_recovery_date': None,
+                    'days_to_recovery': None,
+                    'confidence': 'LOW',
+                    'reasoning': 'No historical dip-recovery patterns found',
+                    'historical_dip_recoveries': []
+                }
+
+            # Analyze recovery patterns
+            recovery_days = [pattern['days_to_recovery'] for pattern in recovery_patterns]
+            avg_recovery_days = np.mean(recovery_days)
+            median_recovery_days = np.median(recovery_days)
+
+            # Check if currently in a dip
+            current_price = prices.iloc[-1]
+            recent_high = rolling_high.iloc[-1]
+            current_dip_magnitude = (current_price - recent_high) / recent_high
+
+            is_currently_in_dip = current_dip_magnitude <= dip_threshold
+
+            if is_currently_in_dip:
+                # Forecast recovery based on historical patterns
+                # Use median recovery time as it's more robust to outliers
+                forecast_days = int(median_recovery_days)
+
+                # Calculate forecast date
+                last_date = stock_data.index[-1]
+                if hasattr(last_date, 'date'):
+                    last_date = last_date.date()
+
+                forecast_date = last_date + timedelta(days=forecast_days)
+
+                # Determine confidence based on consistency of historical patterns
+                recovery_day_std = np.std(recovery_days)
+                consistency_ratio = recovery_day_std / avg_recovery_days if avg_recovery_days > 0 else 1
+
+                if len(recovery_patterns) >= 5 and consistency_ratio < 0.5:
+                    confidence = 'HIGH'
+                elif len(recovery_patterns) >= 3 and consistency_ratio < 0.8:
+                    confidence = 'MEDIUM'
+                else:
+                    confidence = 'LOW'
+
+                reasoning_parts = [
+                    f"Currently in dip: {current_dip_magnitude:.1%} from recent high",
+                    f"Historical analysis of {len(recovery_patterns)} recovery patterns",
+                    f"Average recovery time: {avg_recovery_days:.1f} days",
+                    f"Median recovery time: {median_recovery_days:.1f} days"
+                ]
+
+                # Additional insights
+                successful_recoveries = len(recovery_patterns)
+                avg_recovery_magnitude = np.mean([p['recovery_magnitude'] for p in recovery_patterns])
+                reasoning_parts.append(f"Historical success rate: {successful_recoveries} recoveries analyzed")
+                reasoning_parts.append(f"Average recovery gain: {avg_recovery_magnitude:.1%}")
+
+            else:
+                forecast_date = None
+                forecast_days = None
+                confidence = 'LOW'
+                reasoning_parts = [
+                    f"Not currently in significant dip ({current_dip_magnitude:.1%} from recent high)",
+                    f"Historical analysis shows {len(recovery_patterns)} recovery patterns",
+                    f"Average recovery time when dips occur: {avg_recovery_days:.1f} days"
+                ]
+
+            return {
+                'forecast_recovery_date': forecast_date.strftime('%Y-%m-%d') if forecast_date else None,
+                'days_to_recovery': forecast_days,
+                'confidence': confidence,
+                'reasoning': '; '.join(reasoning_parts),
+                'is_currently_in_dip': is_currently_in_dip,
+                'current_dip_magnitude': current_dip_magnitude,
+                'historical_dip_recoveries': recovery_patterns[-5:],  # Last 5 for summary
+                'recovery_statistics': {
+                    'average_days': avg_recovery_days,
+                    'median_days': median_recovery_days,
+                    'total_patterns': len(recovery_patterns),
+                    'fastest_recovery': min(recovery_days) if recovery_days else None,
+                    'slowest_recovery': max(recovery_days) if recovery_days else None
+                }
+            }
+
+        except Exception as e:
+            return {
+                'forecast_recovery_date': None,
+                'days_to_recovery': None,
+                'confidence': 'LOW',
+                'reasoning': f'Error in recovery forecast analysis: {str(e)}',
+                'historical_dip_recoveries': []
+            }
 
     def _assess_diversification(self, correlation_analysis):
         """Assess portfolio diversification based on correlation analysis."""

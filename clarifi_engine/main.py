@@ -251,6 +251,21 @@ class AdvancedStockAnalysis:
                 print(f"      Risk: {suggestion['risk_level']}")
                 print(f"      Reasoning: {suggestion['reasoning']}")
 
+                # Display enhanced features: holding period and recovery forecast
+                if 'holding_period_analysis' in suggestion:
+                    holding = suggestion['holding_period_analysis']
+                    print(f"      ⏱️  Suggested Holding Period: {holding['suggested_holding_days']} days ({holding['confidence']} confidence)")
+
+                if 'recovery_forecast' in suggestion:
+                    recovery = suggestion['recovery_forecast']
+                    if recovery.get('is_currently_in_dip', False) and recovery.get('forecast_recovery_date'):
+                        print(f"      🔮 Recovery Forecast: {recovery['forecast_recovery_date']} ({recovery.get('confidence', 'UNKNOWN')} confidence)")
+                        print(f"      📉 Currently in dip: {recovery.get('current_dip_magnitude', 0):.1%} from recent high")
+                    elif not recovery.get('is_currently_in_dip', True) and recovery.get('recovery_statistics'):
+                        stats = recovery['recovery_statistics']
+                        print(f"      📈 Historical Recovery Pattern: {stats.get('average_days', 0):.1f} days average")
+                print()
+
             print("✅ Investment suggestions completed!")
 
         # Step 6.5: Seasonal Analysis
