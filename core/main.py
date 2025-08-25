@@ -1220,6 +1220,7 @@ def main():
     ai_parser.add_argument('--no-llm', action='store_true', help='Skip calling the LLM (quant metrics only)')
     ai_parser.add_argument('--show-prompt', action='store_true', help='Print the generated LLM prompt for transparency')
     ai_parser.add_argument('--raw-json', action='store_true', help='Print raw JSON response from AI and final prompt')
+    ai_parser.add_argument('--combined', action='store_true', help='Run comprehensive analysis first and combine with AI recommendations')
     ai_parser.add_argument('--summary-only', action='store_true', help='Only print condensed BUY/SELL/HOLD table')
     ai_parser.add_argument('--model', default='qwen3:latest', help='Ollama model name (default: qwen3:latest)')
 
@@ -2294,11 +2295,18 @@ def main():
                     return
 
             analyzer = AIAnalyzer(model=model_name)
-            print(f"🤖 Running AI quantitative analysis for: {', '.join(tickers)} (period {period})")
+
+            # Determine analysis mode
+            if args.combined:
+                print(f"🤖 Running COMBINED analysis (comprehensive + AI) for: {', '.join(tickers)} (period {period})")
+                print("📊 This includes patterns, options, seasonal, and quantitative analysis...")
+            else:
+                print(f"🤖 Running AI quantitative analysis for: {', '.join(tickers)} (period {period})")
+
             if not call_llm:
                 print("🧪 LLM call disabled (--no-llm)")
 
-            result = analyzer.analyze(tickers, period=period, call_model=call_llm)
+            result = analyzer.analyze(tickers, period=period, call_model=call_llm, include_comprehensive=args.combined)
 
             analyses = result.get('analyses', [])
             if not analyses:
@@ -2351,30 +2359,70 @@ def main():
                     f"{bt.get('strategy_return_pct', float('nan')):<8.2f} {bt.get('excess_return_pct', float('nan')):<11.2f} {a['quantitative_trend']}"
                 )
 
-            llm_parsed = (result.get('llm') or {}).get('parsed')
-            if call_llm and llm_parsed:
-                print("\n🎯 AI Recommendations:")
-                tick_list = llm_parsed.get('tickers') or []
-                if tick_list:
-                    print("Ticker  Recommendation")
-                    print("----------------------")
-                    for t in tick_list:
-                        print(f"{t.get('ticker','?'):<7} {t.get('recommendation','?')}")
-                overall = llm_parsed.get('overall')
-                if overall:
-                    print("\nOverall Stance:", overall.get('stance'))
-                    notes = overall.get('notes') or []
-                    for n in notes[:5]:
-                        print(" -", n)
+            # Display comprehensive analysis results if available
+            if args.combined and result.get('comprehensive_recommendations'):
+                print("\n📋 Comprehensive Analysis Recommendations:")
+                comp_recs = result.get('comprehensive_recommendations', {})
+                for ticker, rec in comp_recs.items():
+                    print(f"  {ticker}: {rec}")
 
-                if not args.summary_only:
-                    # Show rationale details if available
-                    for t in tick_list:
-                        rationale = t.get('rationale') or []
-                        if rationale:
-                            print(f"\n{t.get('ticker')} Rationale:")
-                            for r in rationale[:5]:
-                                print(" -", r)
+            llm_parsed = (result.get('llm') or {}).get('parsed')
+            combined_recs = result.get('combined_recommendations')
+
+            if call_llm and (llm_parsed or combined_recs):
+                # Display combined recommendations if available, otherwise standard AI recommendations
+                if args.combined and combined_recs:
+                    print("\n🎯 Combined AI + Comprehensive Recommendations:")
+                    tick_list = combined_recs.get('tickers') or []
+                    if tick_list:
+                        print("Ticker  AI-Rec  Comp-Rec  Final-Rec  Confidence")
+                        print("------------------------------------------------")
+                        for t in tick_list:
+                            ai_rec = t.get('ai_recommendation', '?')
+                            comp_rec = t.get('comprehensive_recommendation', '?')
+                            final_rec = t.get('recommendation', '?')
+                            confidence = t.get('confidence', '?')
+                            print(f"{t.get('ticker','?'):<7} {ai_rec:<7} {comp_rec:<9} {final_rec:<10} {confidence}")
+
+                    overall = combined_recs.get('overall')
+                    if overall:
+                        print("\nCombined Overall Stance:", overall.get('stance'))
+                        notes = overall.get('notes') or []
+                        for n in notes[:5]:
+                            print(" -", n)
+
+                    if not args.summary_only:
+                        # Show combined rationale details
+                        for t in tick_list:
+                            rationale = t.get('rationale') or []
+                            if rationale:
+                                print(f"\n{t.get('ticker')} Combined Rationale:")
+                                for r in rationale[:5]:
+                                    print(" -", r)
+
+                elif llm_parsed:
+                    print("\n🎯 AI Recommendations:")
+                    tick_list = llm_parsed.get('tickers') or []
+                    if tick_list:
+                        print("Ticker  Recommendation")
+                        print("----------------------")
+                        for t in tick_list:
+                            print(f"{t.get('ticker','?'):<7} {t.get('recommendation','?')}")
+                    overall = llm_parsed.get('overall')
+                    if overall:
+                        print("\nOverall Stance:", overall.get('stance'))
+                        notes = overall.get('notes') or []
+                        for n in notes[:5]:
+                            print(" -", n)
+
+                    if not args.summary_only:
+                        # Show rationale details if available
+                        for t in tick_list:
+                            rationale = t.get('rationale') or []
+                            if rationale:
+                                print(f"\n{t.get('ticker')} Rationale:")
+                                for r in rationale[:5]:
+                                    print(" -", r)
 
             if result.get('errors'):
                 print("\n⚠️  Non-fatal errors:")
