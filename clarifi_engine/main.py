@@ -160,13 +160,14 @@ class AdvancedStockAnalysis:
                 print("  📰 Creating event impact visualizations...")
                 self.advanced_visualizer.plot_event_impact_analysis(event_results)
 
-            # Support/Resistance for first ticker
-            if tickers:
-                print(f"  🎯 Creating support/resistance for {tickers[0]}...")
+            # Support/Resistance for first available ticker
+            if stock_data_dict:
+                first_ticker = list(stock_data_dict.keys())[0]
+                print(f"  🎯 Creating support/resistance for {first_ticker}...")
                 sr_data = self.pattern_analyzer.identify_support_resistance(
-                    stock_data_dict[tickers[0]], tickers[0])
+                    stock_data_dict[first_ticker], first_ticker)
                 self.advanced_visualizer.plot_support_resistance(
-                    sr_data, stock_data_dict[tickers[0]])
+                    sr_data, stock_data_dict[first_ticker])
 
             print("✅ Advanced visualizations completed!")
 
