@@ -9,7 +9,7 @@ import time
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Optional
 
 # Add the current directory to path to import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -133,6 +133,205 @@ class ClariFiEngine:
     def get_portfolios(self) -> List[Dict[str, Any]]:
         """Get all portfolios"""
         return self.portfolio_model.get_all()
+
+    def get_portfolio_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get portfolio by name"""
+        return self.portfolio_model.get_by_name(name)
+
+    def update_portfolio(self, portfolio_id: str, name: str = None, description: str = None) -> Dict[str, Any]:
+        """Update portfolio name and/or description"""
+        command_id = self.log_command("update_portfolio", {
+            "portfolio_id": portfolio_id,
+            "name": name,
+            "description": description
+        })
+
+        try:
+            # Check if portfolio exists
+            portfolio = self.portfolio_model.get_by_id(portfolio_id)
+            if not portfolio:
+                return {
+                    "success": False,
+                    "error": "Portfolio not found",
+                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                }
+
+            # Update portfolio
+            success = self.portfolio_model.update(portfolio_id, name, description)
+            if success:
+                return {
+                    "success": True,
+                    "message": f"Portfolio updated successfully",
+                    "portfolio_id": portfolio_id
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "No changes made",
+                    "message": "No valid fields provided for update"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to update portfolio: {str(e)}"
+            }
+
+    def delete_portfolio(self, portfolio_id: str, confirmation_name: str) -> Dict[str, Any]:
+        """Delete a portfolio with name confirmation"""
+        command_id = self.log_command("delete_portfolio", {
+            "portfolio_id": portfolio_id,
+            "confirmation_provided": bool(confirmation_name)
+        })
+
+        try:
+            # Check if portfolio exists
+            portfolio = self.portfolio_model.get_by_id(portfolio_id)
+            if not portfolio:
+                return {
+                    "success": False,
+                    "error": "Portfolio not found",
+                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                }
+
+            # Verify confirmation name (case sensitive)
+            if confirmation_name != portfolio["name"]:
+                return {
+                    "success": False,
+                    "error": "Name confirmation failed",
+                    "message": f"Please type the exact portfolio name '{portfolio['name']}' to confirm deletion",
+                    "warning": "⚠️  Portfolio deletion is irreversible and will remove all associated data!"
+                }
+
+            # Get tickers count for warning message
+            tickers = self.portfolio_model.get_tickers(portfolio_id)
+            ticker_count = len(tickers)
+
+            # Delete portfolio
+            success = self.portfolio_model.delete(portfolio_id)
+            if success:
+                return {
+                    "success": True,
+                    "message": f"Portfolio '{portfolio['name']}' deleted successfully",
+                    "deleted_tickers": ticker_count,
+                    "portfolio_id": portfolio_id
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Deletion failed",
+                    "message": "Failed to delete portfolio from database"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to delete portfolio: {str(e)}"
+            }
+
+    def sync_portfolio_prices(self, portfolio_id: str) -> Dict[str, Any]:
+        """Sync portfolio by fetching the most recent prices for all tickers"""
+        command_id = self.log_command("sync_portfolio", {"portfolio_id": portfolio_id})
+        start_time = time.time()
+
+        try:
+            # Check if portfolio exists
+            portfolio = self.portfolio_model.get_by_id(portfolio_id)
+            if not portfolio:
+                return {
+                    "success": False,
+                    "error": "Portfolio not found",
+                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                }
+
+            # Get all tickers in portfolio
+            tickers = self.portfolio_model.get_tickers(portfolio_id)
+            if not tickers:
+                return {
+                    "success": True,
+                    "message": "No tickers in portfolio to sync",
+                    "portfolio_name": portfolio["name"],
+                    "synced_tickers": 0
+                }
+
+            sync_results = {}
+            successful_syncs = 0
+            failed_syncs = 0
+
+            print(f"\n🔄 Syncing prices for portfolio '{portfolio['name']}'...")
+
+            for ticker_data in tickers:
+                ticker = ticker_data["ticker"]
+                try:
+                    print(f"📥 Fetching current price for {ticker}...")
+
+                    # Download recent data (1 day to get latest price)
+                    stock_data = self.downloader.download_stock_data(ticker, None, None, period="1d")
+
+                    if stock_data is not None and not stock_data.empty:
+                        # Get the most recent closing price
+                        latest_price = float(stock_data['Close'].iloc[-1])
+
+                        # Update the price in database
+                        update_success = self.portfolio_model.update_ticker_price(
+                            portfolio_id, ticker, latest_price
+                        )
+
+                        if update_success:
+                            sync_results[ticker] = {
+                                "success": True,
+                                "previous_price": ticker_data.get("current_price", 0.0),
+                                "current_price": latest_price,
+                                "price_change": latest_price - ticker_data.get("current_price", 0.0),
+                                "price_change_pct": ((latest_price / ticker_data.get("current_price", latest_price)) - 1) * 100 if ticker_data.get("current_price", 0) > 0 else 0.0
+                            }
+                            successful_syncs += 1
+                            print(f"✅ {ticker}: ${latest_price:.2f}")
+                        else:
+                            sync_results[ticker] = {
+                                "success": False,
+                                "error": "Database update failed"
+                            }
+                            failed_syncs += 1
+                    else:
+                        sync_results[ticker] = {
+                            "success": False,
+                            "error": "No price data available"
+                        }
+                        failed_syncs += 1
+                        print(f"❌ {ticker}: Failed to fetch price data")
+
+                except Exception as e:
+                    sync_results[ticker] = {
+                        "success": False,
+                        "error": str(e)
+                    }
+                    failed_syncs += 1
+                    print(f"❌ {ticker}: {str(e)}")
+
+            execution_time = time.time() - start_time
+
+            return {
+                "success": True,
+                "message": f"Portfolio sync completed",
+                "portfolio_name": portfolio["name"],
+                "portfolio_id": portfolio_id,
+                "total_tickers": len(tickers),
+                "successful_syncs": successful_syncs,
+                "failed_syncs": failed_syncs,
+                "sync_results": sync_results,
+                "execution_time": execution_time,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to sync portfolio: {str(e)}",
+                "execution_time": execution_time
+            }
 
     def add_ticker_to_portfolio(self, portfolio_id: str, ticker: str,
                                quantity: float = 0.0, avg_cost: float = 0.0) -> Dict[str, Any]:

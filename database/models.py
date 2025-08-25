@@ -54,11 +54,24 @@ class DatabaseManager:
                     ticker TEXT NOT NULL,
                     quantity REAL DEFAULT 0.0,
                     avg_cost REAL DEFAULT 0.0,
+                    current_price REAL DEFAULT 0.0,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE,
                     UNIQUE(portfolio_id, ticker)
                 )
             ''')
+
+            # Add current_price and updated_at columns if they don't exist (for existing databases)
+            try:
+                cursor.execute('ALTER TABLE portfolio_tickers ADD COLUMN current_price REAL DEFAULT 0.0')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            try:
+                cursor.execute('ALTER TABLE portfolio_tickers ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
             # Analysis results table
             cursor.execute('''
@@ -163,6 +176,14 @@ class Portfolio:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    def get_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get portfolio by name"""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM portfolios WHERE name = ?', (name,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def add_ticker(self, portfolio_id: str, ticker: str, quantity: float = 0.0, avg_cost: float = 0.0) -> str:
         """Add a ticker to portfolio"""
         ticker_id = str(uuid.uuid4())
@@ -196,6 +217,59 @@ class Portfolio:
                 ORDER BY ticker
             ''', (portfolio_id,))
             return [dict(row) for row in cursor.fetchall()]
+
+    def update(self, portfolio_id: str, name: str = None, description: str = None) -> bool:
+        """Update portfolio name and/or description"""
+        if name is None and description is None:
+            return False
+
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build dynamic update query
+            updates = []
+            params = []
+
+            if name is not None:
+                updates.append("name = ?")
+                params.append(name)
+
+            if description is not None:
+                updates.append("description = ?")
+                params.append(description)
+
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(portfolio_id)
+
+            query = f"UPDATE portfolios SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete(self, portfolio_id: str) -> bool:
+        """Delete portfolio and all associated tickers"""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # First delete all tickers in the portfolio
+            cursor.execute('DELETE FROM portfolio_tickers WHERE portfolio_id = ?', (portfolio_id,))
+
+            # Then delete the portfolio itself
+            cursor.execute('DELETE FROM portfolios WHERE id = ?', (portfolio_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_ticker_price(self, portfolio_id: str, ticker: str, current_price: float) -> bool:
+        """Update the current price for a ticker in portfolio"""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE portfolio_tickers
+                SET current_price = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE portfolio_id = ? AND ticker = ?
+            ''', (current_price, portfolio_id, ticker.upper()))
+            conn.commit()
+            return cursor.rowcount > 0
 
 
 class AnalysisResult:
