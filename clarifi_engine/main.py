@@ -1147,6 +1147,7 @@ def main():
     ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
     ./run.sh portfolio list
     ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
+    ./run.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
     ./run.sh portfolio tickers <portfolio_id>
     ./run.sh portfolio analyze <portfolio_id> --period 6mo --summary-only
     ./run.sh portfolio remove <portfolio_id> AAPL
@@ -1252,7 +1253,7 @@ def main():
     screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
     # Portfolio management (grouped subcommands)
-    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, update, sync, delete, remove, tickers, analyze)')
+    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
     port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
 
     # portfolio create
@@ -1278,6 +1279,13 @@ def main():
     # portfolio tickers
     p_tickers = port_sub.add_parser('tickers', help='List tickers in a portfolio')
     p_tickers.add_argument('portfolio_id', help='Portfolio ID')
+
+    # portfolio update-ticker
+    p_update_ticker = port_sub.add_parser('update-ticker', help='Update ticker quantity and/or average cost')
+    p_update_ticker.add_argument('portfolio_id', help='Portfolio ID')
+    p_update_ticker.add_argument('ticker', help='Ticker symbol')
+    p_update_ticker.add_argument('--quantity', '-q', type=float, help='New quantity')
+    p_update_ticker.add_argument('--avg-cost', '-c', type=float, help='New average cost')
 
     # portfolio update
     p_update = port_sub.add_parser('update', help='Update portfolio name and/or description')
@@ -1651,6 +1659,24 @@ def main():
             elif cmd == 'tickers':
                 tickers = engine.get_portfolio_tickers(args.portfolio_id)
                 format_tickers_table(tickers, args.portfolio_id)
+
+            elif cmd == 'update-ticker':
+                # Validate that at least one field is provided
+                if args.quantity is None and args.avg_cost is None:
+                    print("❌ Error: At least one of --quantity or --avg-cost must be provided")
+                    return
+
+                result = engine.update_ticker_in_portfolio(
+                    args.portfolio_id, args.ticker, args.quantity, args.avg_cost
+                )
+                if result.get('success'):
+                    print(f"✅ Ticker {result.get('ticker')} updated successfully")
+                    if args.quantity is not None:
+                        print(f"   New quantity: {args.quantity}")
+                    if args.avg_cost is not None:
+                        print(f"   New average cost: ${args.avg_cost:.2f}")
+                else:
+                    print(f"❌ Failed to update ticker: {result.get('message')}")
 
             elif cmd == 'update':
                 # Validate that at least one field is provided

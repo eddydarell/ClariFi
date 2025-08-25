@@ -271,6 +271,34 @@ class Portfolio:
             conn.commit()
             return cursor.rowcount > 0
 
+    def update_ticker(self, portfolio_id: str, ticker: str, quantity: float = None, avg_cost: float = None) -> bool:
+        """Update ticker quantity and/or average cost"""
+        if quantity is None and avg_cost is None:
+            return False
+
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Build dynamic update query
+            updates = []
+            params = []
+
+            if quantity is not None:
+                updates.append("quantity = ?")
+                params.append(quantity)
+
+            if avg_cost is not None:
+                updates.append("avg_cost = ?")
+                params.append(avg_cost)
+
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.extend([portfolio_id, ticker.upper()])
+
+            query = f"UPDATE portfolio_tickers SET {', '.join(updates)} WHERE portfolio_id = ? AND ticker = ?"
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount > 0
+
 
 class AnalysisResult:
     """Analysis results model"""

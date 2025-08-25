@@ -387,6 +387,71 @@ class ClariFiEngine:
         """Get all tickers in a portfolio"""
         return self.portfolio_model.get_tickers(portfolio_id)
 
+    def update_ticker_in_portfolio(self, portfolio_id: str, ticker: str,
+                                 quantity: float = None, avg_cost: float = None) -> Dict[str, Any]:
+        """Update ticker quantity and/or average cost in a portfolio"""
+        command_id = self.log_command("update_ticker", {
+            "portfolio_id": portfolio_id,
+            "ticker": ticker,
+            "quantity": quantity,
+            "avg_cost": avg_cost
+        })
+
+        try:
+            # Validate that at least one field is provided
+            if quantity is None and avg_cost is None:
+                return {
+                    "success": False,
+                    "error": "No updates provided",
+                    "message": "At least one of quantity or avg_cost must be provided"
+                }
+
+            # Check if portfolio exists
+            portfolio = self.portfolio_model.get_by_id(portfolio_id)
+            if not portfolio:
+                return {
+                    "success": False,
+                    "error": "Portfolio not found",
+                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                }
+
+            # Check if ticker exists in portfolio
+            tickers = self.portfolio_model.get_tickers(portfolio_id)
+            ticker_exists = any(t['ticker'].upper() == ticker.upper() for t in tickers)
+            if not ticker_exists:
+                return {
+                    "success": False,
+                    "error": "Ticker not found",
+                    "message": f"Ticker {ticker.upper()} not found in portfolio"
+                }
+
+            # Update the ticker
+            success = self.portfolio_model.update_ticker(portfolio_id, ticker, quantity, avg_cost)
+            if success:
+                response = {
+                    "success": True,
+                    "message": f"Ticker {ticker.upper()} updated successfully",
+                    "ticker": ticker.upper()
+                }
+                if quantity is not None:
+                    response["new_quantity"] = quantity
+                if avg_cost is not None:
+                    response["new_avg_cost"] = avg_cost
+                return response
+            else:
+                return {
+                    "success": False,
+                    "error": "Update failed",
+                    "message": "Failed to update ticker in database"
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to update ticker: {str(e)}"
+            }
+
     # Analysis Methods
     def comprehensive_analysis(self, tickers: List[str], portfolio_id: str = None,
                              period: str = "1y", save_to_db: bool = True,
