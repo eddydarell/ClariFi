@@ -1252,7 +1252,7 @@ def main():
     screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
     # Portfolio management (grouped subcommands)
-    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, remove, tickers, analyze)')
+    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, update, sync, delete, remove, tickers, analyze)')
     port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
 
     # portfolio create
@@ -1278,6 +1278,21 @@ def main():
     # portfolio tickers
     p_tickers = port_sub.add_parser('tickers', help='List tickers in a portfolio')
     p_tickers.add_argument('portfolio_id', help='Portfolio ID')
+
+    # portfolio update
+    p_update = port_sub.add_parser('update', help='Update portfolio name and/or description')
+    p_update.add_argument('portfolio_id', help='Portfolio ID')
+    p_update.add_argument('--name', '-n', help='New portfolio name')
+    p_update.add_argument('--description', '-d', help='New portfolio description')
+
+    # portfolio delete
+    p_delete = port_sub.add_parser('delete', help='Delete a portfolio (requires confirmation)')
+    p_delete.add_argument('portfolio_id', help='Portfolio ID')
+    p_delete.add_argument('--confirm-name', required=True, help='Type the exact portfolio name to confirm deletion (case sensitive)')
+
+    # portfolio sync
+    p_sync = port_sub.add_parser('sync', help='Sync portfolio by fetching latest prices for all tickers')
+    p_sync.add_argument('portfolio_id', help='Portfolio ID')
 
     # portfolio analyze
     p_analyze = port_sub.add_parser('analyze', help='Run comprehensive analysis on all tickers in a portfolio')
@@ -1559,15 +1574,15 @@ def main():
                     return
 
                 print("📁 Portfolios:")
-                print("┌─────────────────────────────────────────┬─────────────────┬───────────────────────────────┐")
-                print("│ ID (first 8 chars)                     │ Name            │ Description                   │")
-                print("├─────────────────────────────────────────┼─────────────────┼───────────────────────────────┤")
+                print("┌──────────────────────────────────────┬─────────────────┬───────────────────────────────┐")
+                print("│ Portfolio ID                         │ Name            │ Description                   │")
+                print("├──────────────────────────────────────┼─────────────────┼───────────────────────────────┤")
                 for p in portfolios:
-                    short_id = p['id'][:8] + "..."
+                    portfolio_id = p['id'][:36]  # Full UUID
                     name = p['name'][:15]
                     desc = (p.get('description', '') or '')[:29]
-                    print(f"│ {short_id:39} │ {name:15} │ {desc:29} │")
-                print("└─────────────────────────────────────────┴─────────────────┴───────────────────────────────┘")
+                    print(f"│ {portfolio_id:36} │ {name:15} │ {desc:29} │")
+                print("└──────────────────────────────────────┴─────────────────┴───────────────────────────────┘")
 
             def format_tickers_table(tickers, portfolio_id):
                 """Format tickers as a clean table"""
@@ -1636,6 +1651,93 @@ def main():
             elif cmd == 'tickers':
                 tickers = engine.get_portfolio_tickers(args.portfolio_id)
                 format_tickers_table(tickers, args.portfolio_id)
+
+            elif cmd == 'update':
+                # Validate that at least one field is provided
+                if not args.name and not args.description:
+                    print("❌ Error: At least one of --name or --description must be provided")
+                    return
+
+                result = engine.update_portfolio(args.portfolio_id, args.name, args.description)
+                if result.get('success'):
+                    print(f"✅ Portfolio updated successfully")
+                    if args.name:
+                        print(f"   New name: {args.name}")
+                    if args.description:
+                        print(f"   New description: {args.description}")
+                else:
+                    print(f"❌ Failed to update portfolio: {result.get('message')}")
+
+            elif cmd == 'delete':
+                # Show warning and get portfolio info first
+                portfolio = engine.portfolio_model.get_by_id(args.portfolio_id)
+                if not portfolio:
+                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    return
+
+                tickers = engine.get_portfolio_tickers(args.portfolio_id)
+                ticker_count = len(tickers)
+
+                print(f"⚠️  WARNING: You are about to delete portfolio '{portfolio['name']}'")
+                print(f"   This action is IRREVERSIBLE and will:")
+                print(f"   - Delete the portfolio permanently")
+                print(f"   - Remove all {ticker_count} associated tickers")
+                print(f"   - Remove all analysis history")
+                print()
+
+                result = engine.delete_portfolio(args.portfolio_id, args.confirm_name)
+                if result.get('success'):
+                    print(f"✅ {result.get('message')}")
+                    print(f"   Deleted tickers: {result.get('deleted_tickers', 0)}")
+                else:
+                    print(f"❌ {result.get('message')}")
+                    if 'warning' in result:
+                        print(f"   {result['warning']}")
+
+            elif cmd == 'sync':
+                # Show portfolio info first
+                portfolio = engine.portfolio_model.get_by_id(args.portfolio_id)
+                if not portfolio:
+                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    return
+
+                print(f"🔄 Syncing prices for portfolio '{portfolio['name']}'...")
+
+                result = engine.sync_portfolio_prices(args.portfolio_id)
+                if result.get('success'):
+                    print(f"✅ {result.get('message')}")
+                    print(f"   Portfolio: {result.get('portfolio_name')}")
+                    print(f"   Total tickers: {result.get('total_tickers', 0)}")
+                    print(f"   Successful syncs: {result.get('successful_syncs', 0)}")
+                    print(f"   Failed syncs: {result.get('failed_syncs', 0)}")
+                    print(f"   Execution time: {result.get('execution_time', 0):.2f}s")
+
+                    # Show detailed results in a table
+                    sync_results = result.get('sync_results', {})
+                    if sync_results:
+                        print("\n📊 Price Update Details:")
+                        print("┌─────────┬─────────────┬─────────────┬─────────────┬──────────────┐")
+                        print("│ Ticker  │ Status      │ New Price   │ Change $    │ Change %     │")
+                        print("├─────────┼─────────────┼─────────────┼─────────────┼──────────────┤")
+
+                        for ticker, data in sync_results.items():
+                            if data.get('success'):
+                                status = "✅ Updated"
+                                price = f"${data.get('current_price', 0):.2f}"
+                                change_dollar = f"{data.get('price_change', 0):+.2f}"
+                                change_percent = f"{data.get('price_change_pct', 0):+.2f}%"
+                            else:
+                                status = "❌ Failed"
+                                price = "N/A"
+                                change_dollar = "N/A"
+                                change_percent = "N/A"
+
+                            print(f"│ {ticker:7} │ {status:11} │ {price:11} │ {change_dollar:11} │ {change_percent:12} │")
+
+                        print("└─────────┴─────────────┴─────────────┴─────────────┴──────────────┘")
+                else:
+                    print(f"❌ Failed to sync portfolio: {result.get('message')}")
+                    print(f"   Error: {result.get('error', 'Unknown error')}")
 
             elif cmd == 'analyze':
                 # Fetch tickers first
@@ -1770,9 +1872,9 @@ def main():
                 )
                 if trends:
                     print("📈 Accuracy Trends:")
-                    print("┌─────────┬─────────────────┬─────────────────┐")
+                    print("┌─────────┬─────────────────┬──────────────────┐")
                     print("│ Ticker  │ Avg Accuracy    │ Total Comparisons│")
-                    print("├─────────┼─────────────────┼─────────────────┤")
+                    print("├─────────┼─────────────────┼──────────────────┤")
                     for t in trends:
                         ticker = t.get('ticker', '')[:7]
                         accuracy = f"{t.get('avg_accuracy', 0):.2%}"[:15]

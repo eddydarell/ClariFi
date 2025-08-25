@@ -1,6 +1,7 @@
 # Portfolio Management Features Update
 
 ## Overview
+
 This update adds three key portfolio management features to the ClariFi Engine:
 
 1. **Portfolio Update** - Modify portfolio name and description
@@ -10,6 +11,7 @@ This update adds three key portfolio management features to the ClariFi Engine:
 ## Features Added
 
 ### 1. Portfolio Update
+
 Update a portfolio's name and/or description.
 
 ```python
@@ -34,6 +36,7 @@ result = engine.update_portfolio(
 ```
 
 **Response Format:**
+
 ```python
 {
     "success": True,
@@ -43,6 +46,7 @@ result = engine.update_portfolio(
 ```
 
 ### 2. Portfolio Deletion
+
 Safely delete a portfolio with name confirmation to prevent accidental deletions.
 
 ```python
@@ -54,12 +58,14 @@ result = engine.delete_portfolio(
 ```
 
 **Features:**
+
 - **Case-sensitive confirmation** - Must type exact portfolio name
 - **Warning message** - Shows clear warning about irreversible action
 - **Cascading delete** - Removes all associated tickers
 - **Count reporting** - Reports how many tickers were deleted
 
 **Response Format:**
+
 ```python
 {
     "success": True,
@@ -70,6 +76,7 @@ result = engine.delete_portfolio(
 ```
 
 **Error Response (wrong confirmation):**
+
 ```python
 {
     "success": False,
@@ -80,6 +87,7 @@ result = engine.delete_portfolio(
 ```
 
 ### 3. Portfolio Price Sync
+
 Fetch the most recent prices for all tickers in a portfolio and update the database.
 
 ```python
@@ -88,6 +96,7 @@ result = engine.sync_portfolio_prices(portfolio_id="your-portfolio-id")
 ```
 
 **Features:**
+
 - **Real-time price fetching** - Uses the stock downloader to get latest prices
 - **Batch processing** - Handles multiple tickers efficiently
 - **Error handling** - Gracefully handles individual ticker failures
@@ -95,6 +104,7 @@ result = engine.sync_portfolio_prices(portfolio_id="your-portfolio-id")
 - **Performance metrics** - Reports execution time and success rates
 
 **Response Format:**
+
 ```python
 {
     "success": True,
@@ -125,11 +135,14 @@ result = engine.sync_portfolio_prices(portfolio_id="your-portfolio-id")
 ## Database Changes
 
 ### Schema Updates
+
 Added new columns to `portfolio_tickers` table:
+
 - `current_price REAL DEFAULT 0.0` - Stores the most recent price
 - `updated_at TIMESTAMP` - Tracks when the price was last updated
 
 ### New Methods in Portfolio Model
+
 - `update(portfolio_id, name=None, description=None)` - Update portfolio
 - `delete(portfolio_id)` - Delete portfolio and associated tickers
 - `update_ticker_price(portfolio_id, ticker, current_price)` - Update ticker price
@@ -138,6 +151,7 @@ Added new columns to `portfolio_tickers` table:
 ## Usage Examples
 
 ### Complete Workflow Example
+
 ```python
 from clarifi_engine.engine import ClariFiEngine
 
@@ -169,6 +183,7 @@ delete_result = engine.delete_portfolio(portfolio_id, portfolio["name"])
 ```
 
 ### Helper Methods
+
 ```python
 # Get portfolio by name instead of ID
 portfolio = engine.get_portfolio_by_name("My Tech Stocks")
@@ -182,12 +197,14 @@ for p in portfolios:
 ## Error Handling
 
 All methods return standardized response formats with:
+
 - `success`: Boolean indicating if operation succeeded
 - `message`: Human-readable status message
 - `error`: Error details (when success=False)
 - Additional context-specific fields
 
 ### Common Error Scenarios
+
 1. **Portfolio not found** - Invalid portfolio ID
 2. **Name confirmation failed** - Incorrect deletion confirmation
 3. **Database errors** - Connection or query issues
@@ -218,6 +235,7 @@ python3 test_portfolio_features.py
 ```
 
 The test script demonstrates:
+
 - Portfolio creation and updates
 - Ticker management
 - Price synchronization
