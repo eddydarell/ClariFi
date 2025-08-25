@@ -25,6 +25,9 @@ try:
     from advanced_visualizer import AdvancedVisualizer
     from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
     from seasonal_analyzer import SeasonalAnalyzer
+    # Import ClariFi Engine for portfolio management
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clarifi_engine'))
+    from engine import ClariFiEngine
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -836,7 +839,15 @@ def main():
   ./run.sh analyze "SAAB B" NANEXA --period 6mo --no-events
   ./run.sh analyze AAPL --include-deep --deep-chunk-months 6
 
-📈 PATTERN ANALYSIS:
+� PORTFOLIO MANAGEMENT:
+  ./run.sh portfolio create "My Portfolio" --description "Tech stocks"
+  ./run.sh portfolio list
+  ./run.sh portfolio add "My Portfolio" AAPL --quantity 10 --cost 150.0
+  ./run.sh portfolio info "My Portfolio" --analytics
+  ./run.sh portfolio analyze "My Portfolio" --period 1y
+  ./run.sh portfolio remove "My Portfolio" AAPL
+
+�📈 PATTERN ANALYSIS:
   ./run.sh patterns AAPL MSFT GOOGL --period 2y
   ./run.sh correlations PLTR QBTS --window 30
 
@@ -865,6 +876,15 @@ def main():
   ✅ Risk assessment and prediction
   ✅ Investment suggestion engine
   ✅ Portfolio-level recommendations
+
+💼 PORTFOLIO FEATURES:
+  ✅ Portfolio creation and management
+  ✅ Ticker tracking with cost basis
+  ✅ Real-time portfolio valuation
+  ✅ Comprehensive portfolio analytics
+  ✅ Risk distribution analysis
+  ✅ Performance tracking and accuracy metrics
+  ✅ Transaction history and changes tracking
 
 ⚖️ OPTIONS & RISK ANALYSIS:
   ./run.sh analyze AAPL MSFT --period 1y  # Full analysis with options
@@ -956,6 +976,47 @@ def main():
 
     # List command
     list_parser = subparsers.add_parser('list', help='📋 List available data files')
+
+    # Portfolio management commands
+    portfolio_parser = subparsers.add_parser('portfolio', help='💼 Portfolio management')
+    portfolio_subparsers = portfolio_parser.add_subparsers(dest='portfolio_action', help='Portfolio actions')
+
+    # Create portfolio
+    create_portfolio_parser = portfolio_subparsers.add_parser('create', help='Create new portfolio')
+    create_portfolio_parser.add_argument('name', help='Portfolio name')
+    create_portfolio_parser.add_argument('--description', '-d', default='', help='Portfolio description')
+
+    # List portfolios
+    list_portfolios_parser = portfolio_subparsers.add_parser('list', help='List all portfolios')
+
+    # Show portfolio info
+    info_portfolio_parser = portfolio_subparsers.add_parser('info', help='📊 Show comprehensive portfolio information')
+    info_portfolio_parser.add_argument('portfolio', help='Portfolio name or ID')
+    info_portfolio_parser.add_argument('--analytics', '-a', action='store_true', help='Include advanced analytics')
+
+    # Add ticker to portfolio
+    add_ticker_parser = portfolio_subparsers.add_parser('add', help='Add ticker to portfolio')
+    add_ticker_parser.add_argument('portfolio', help='Portfolio name or ID')
+    add_ticker_parser.add_argument('ticker', help='Stock ticker symbol')
+    add_ticker_parser.add_argument('--quantity', '-q', type=float, default=0.0, help='Number of shares')
+    add_ticker_parser.add_argument('--cost', '-c', type=float, default=0.0, help='Average cost per share')
+
+    # Remove ticker from portfolio
+    remove_ticker_parser = portfolio_subparsers.add_parser('remove', help='Remove ticker from portfolio')
+    remove_ticker_parser.add_argument('portfolio', help='Portfolio name or ID')
+    remove_ticker_parser.add_argument('ticker', help='Stock ticker symbol')
+
+    # Analyze portfolio
+    analyze_portfolio_parser = portfolio_subparsers.add_parser('analyze', help='🔬 Comprehensive portfolio analysis')
+    analyze_portfolio_parser.add_argument('portfolio', help='Portfolio name or ID')
+    analyze_portfolio_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
+    analyze_portfolio_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    analyze_portfolio_parser.add_argument('--no-patterns', action='store_true', help='Skip pattern analysis')
+    analyze_portfolio_parser.add_argument('--no-events', action='store_true', help='Skip event correlation')
+    analyze_portfolio_parser.add_argument('--no-advanced-viz', action='store_true', help='Skip advanced visualizations')
+    analyze_portfolio_parser.add_argument('--no-options', action='store_true', help='Skip Black-Scholes options analysis')
+    analyze_portfolio_parser.add_argument('--no-investment-advice', action='store_true', help='Skip investment suggestions')
+    analyze_portfolio_parser.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
 
     args = parser.parse_args()
 
@@ -1148,6 +1209,245 @@ def main():
 
         elif args.command == 'list':
             legacy_analysis.list_available_data()
+
+        elif args.command == 'portfolio':
+            # Initialize ClariFi Engine for portfolio management
+            try:
+                engine = ClariFiEngine()
+            except Exception as e:
+                print(f"❌ Error initializing portfolio engine: {e}")
+                return
+
+            if args.portfolio_action == 'create':
+                print(f"💼 Creating portfolio: {args.name}")
+                result = engine.create_portfolio(args.name, args.description)
+                if result["success"]:
+                    print(f"✅ Portfolio '{args.name}' created successfully!")
+                    print(f"   📝 Description: {args.description}")
+                    print(f"   🆔 ID: {result['portfolio_id']}")
+                else:
+                    print(f"❌ Failed to create portfolio: {result['message']}")
+
+            elif args.portfolio_action == 'list':
+                print("💼 Available Portfolios:")
+                portfolios = engine.get_portfolios()
+                if portfolios:
+                    for portfolio in portfolios:
+                        print(f"   📁 {portfolio['name']} (ID: {portfolio['id'][:8]}...)")
+                        if portfolio['description']:
+                            print(f"      📝 {portfolio['description']}")
+                        print(f"      📅 Created: {portfolio['created_at']}")
+                        print()
+                else:
+                    print("   📂 No portfolios found. Create one with: ./run.sh portfolio create <name>")
+
+            elif args.portfolio_action == 'info':
+                print(f"📊 Portfolio Information: {args.portfolio}")
+
+                # Try to find portfolio by name first, then by ID
+                portfolio = engine.get_portfolio_by_name(args.portfolio)
+                if not portfolio:
+                    # Try by ID (allow partial ID matching)
+                    portfolios = engine.get_portfolios()
+                    for p in portfolios:
+                        if p['id'].startswith(args.portfolio) or p['id'] == args.portfolio:
+                            portfolio = p
+                            break
+
+                if not portfolio:
+                    print(f"❌ Portfolio '{args.portfolio}' not found")
+                    return
+
+                portfolio_id = portfolio['id']
+
+                # Get comprehensive portfolio information
+                result = engine.get_portfolio_info(portfolio_id)
+                if result["success"]:
+                    data = result["data"]
+                    portfolio_info = data["portfolio"]
+                    summary = data["summary"]
+                    tickers = data["tickers"]
+                    accuracy = data["accuracy_metrics"]
+                    changes = data["recent_changes"]
+
+                    print(f"   📁 Name: {portfolio_info['name']}")
+                    print(f"   📝 Description: {portfolio_info['description']}")
+                    print(f"   🆔 ID: {portfolio_id}")
+                    print(f"   📅 Created: {portfolio_info['created_at']}")
+                    print()
+
+                    # Portfolio Summary
+                    print("📈 Portfolio Summary:")
+                    print(f"   🎯 Total Tickers: {summary['total_tickers']}")
+                    print(f"   💰 Total Current Value: ${summary['total_current_value']:,.2f}")
+                    print(f"   💸 Total Cost Basis: ${summary['total_cost']:,.2f}")
+                    print(f"   📊 Total P&L: ${summary['total_unrealized_pnl']:,.2f}")
+                    print(f"   📈 Portfolio Change: {summary['portfolio_percentage_change']:.2f}%")
+                    print()
+
+                    # Tickers Details
+                    if tickers:
+                        print("📋 Ticker Details:")
+                        for ticker in tickers:
+                            print(f"   🏷️  {ticker['ticker']}:")
+                            print(f"      📈 Quantity: {ticker['quantity']:.2f} shares")
+                            print(f"      💰 Avg Cost: ${ticker['avg_cost']:.2f}")
+                            if ticker['current_price']:
+                                print(f"      💵 Current Price: ${ticker['current_price']:.2f}")
+                                print(f"      💎 Current Value: ${ticker.get('current_value', 0):.2f}")
+                                if ticker.get('percentage_change'):
+                                    sign = "📈" if ticker['percentage_change'] >= 0 else "📉"
+                                    print(f"      {sign} Change: {ticker['percentage_change']:.2f}%")
+
+                            if ticker.get('analysis'):
+                                analysis_info = ticker['analysis']
+                                print(f"      🎯 Recommendation: {analysis_info.get('recommendation', 'N/A')}")
+                                print(f"      ⚠️  Risk Level: {analysis_info.get('risk_level', 'N/A')}")
+                                print(f"      🎲 Confidence: {analysis_info.get('confidence_level', 'N/A')}")
+                            print()
+
+                    # Accuracy Metrics
+                    if accuracy['total_predictions'] > 0:
+                        print("🎯 Accuracy Metrics:")
+                        print(f"   📊 Average Accuracy: {accuracy['avg_accuracy']:.2f}%")
+                        print(f"   🔢 Total Predictions: {accuracy['total_predictions']}")
+                        print(f"   📈 Best Accuracy: {accuracy['max_accuracy']:.2f}%")
+                        print(f"   📉 Worst Accuracy: {accuracy['min_accuracy']:.2f}%")
+                        print()
+
+                    # Recent Changes
+                    if changes:
+                        print("🔄 Recent Changes (Last 30 days):")
+                        for change in changes[:5]:  # Show latest 5 changes
+                            action_emoji = {
+                                'ADD': '➕',
+                                'REMOVE': '➖',
+                                'UPDATE_QUANTITY': '🔄',
+                                'UPDATE_PRICE': '💰'
+                            }.get(change['transaction_type'], '🔄')
+
+                            print(f"   {action_emoji} {change['transaction_type']}: {change['ticker']}")
+                            print(f"      📅 {change['change_date']}")
+                            if change.get('notes'):
+                                print(f"      📝 {change['notes']}")
+                        print()
+
+                    # Get analytics if requested
+                    if args.analytics:
+                        print("📊 Advanced Analytics:")
+                        analytics_result = engine.get_portfolio_analytics(portfolio_id)
+                        if analytics_result["success"]:
+                            analytics = analytics_result["data"]
+
+                            if analytics.get("risk_distribution"):
+                                print("   ⚠️  Risk Distribution:")
+                                for risk in analytics["risk_distribution"]:
+                                    print(f"      • {risk.get('risk_level', 'Unknown')}: {risk.get('count', 0)} tickers")
+                                print()
+
+                            if analytics.get("recommendation_distribution"):
+                                print("   💡 Recommendation Distribution:")
+                                for rec in analytics["recommendation_distribution"]:
+                                    print(f"      • {rec.get('recommendation', 'Unknown')}: {rec.get('count', 0)} tickers")
+                                print()
+
+                else:
+                    print(f"❌ Failed to get portfolio info: {result['message']}")
+
+            elif args.portfolio_action == 'add':
+                print(f"➕ Adding {args.ticker} to portfolio: {args.portfolio}")
+
+                # Find portfolio
+                portfolio = engine.get_portfolio_by_name(args.portfolio)
+                if not portfolio:
+                    portfolios = engine.get_portfolios()
+                    for p in portfolios:
+                        if p['id'].startswith(args.portfolio):
+                            portfolio = p
+                            break
+
+                if not portfolio:
+                    print(f"❌ Portfolio '{args.portfolio}' not found")
+                    return
+
+                result = engine.add_ticker_to_portfolio(
+                    portfolio['id'], args.ticker, args.quantity, args.cost
+                )
+                if result["success"]:
+                    print(f"✅ Added {args.ticker} to portfolio successfully!")
+                    print(f"   📈 Quantity: {args.quantity}")
+                    print(f"   💰 Average Cost: ${args.cost:.2f}")
+                else:
+                    print(f"❌ Failed to add ticker: {result['message']}")
+
+            elif args.portfolio_action == 'remove':
+                print(f"➖ Removing {args.ticker} from portfolio: {args.portfolio}")
+
+                # Find portfolio
+                portfolio = engine.get_portfolio_by_name(args.portfolio)
+                if not portfolio:
+                    portfolios = engine.get_portfolios()
+                    for p in portfolios:
+                        if p['id'].startswith(args.portfolio):
+                            portfolio = p
+                            break
+
+                if not portfolio:
+                    print(f"❌ Portfolio '{args.portfolio}' not found")
+                    return
+
+                result = engine.remove_ticker_from_portfolio(portfolio['id'], args.ticker)
+                if result["success"]:
+                    print(f"✅ Removed {args.ticker} from portfolio successfully!")
+                else:
+                    print(f"❌ Failed to remove ticker: {result['message']}")
+
+            elif args.portfolio_action == 'analyze':
+                print(f"🔬 Analyzing portfolio: {args.portfolio}")
+
+                # Find portfolio
+                portfolio = engine.get_portfolio_by_name(args.portfolio)
+                if not portfolio:
+                    portfolios = engine.get_portfolios()
+                    for p in portfolios:
+                        if p['id'].startswith(args.portfolio):
+                            portfolio = p
+                            break
+
+                if not portfolio:
+                    print(f"❌ Portfolio '{args.portfolio}' not found")
+                    return
+
+                # Get portfolio tickers first
+                tickers_data = engine.get_portfolio_tickers(portfolio['id'])
+                if not tickers_data:
+                    print(f"❌ No tickers found in portfolio '{args.portfolio}'")
+                    return
+
+                tickers = [t["ticker"] for t in tickers_data]
+                print(f"📊 Analyzing {len(tickers)} tickers: {', '.join(tickers)}")
+
+                # Run comprehensive analysis on portfolio
+                result = engine.comprehensive_analysis(
+                    tickers=tickers,
+                    portfolio_id=portfolio['id'],
+                    period=args.period,
+                    include_patterns=not args.no_patterns,
+                    include_events=not args.no_events,
+                    include_options=not args.no_options,
+                    include_seasonal=not args.no_seasonal,
+                    save_to_db=True
+                )
+
+                if result.get("success", True):  # Default to True if not specified
+                    print("✅ Portfolio analysis completed successfully!")
+                    if result.get("message"):
+                        print(f"   📝 {result['message']}")
+                else:
+                    print(f"❌ Portfolio analysis failed: {result.get('message', 'Unknown error')}")
+
+            else:
+                print("❌ Unknown portfolio action. Use: create, list, info, add, remove, or analyze")
 
     except KeyboardInterrupt:
         print("\n⚠️  Operation cancelled by user")

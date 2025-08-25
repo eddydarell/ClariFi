@@ -1146,6 +1146,8 @@ def main():
 � PORTFOLIO MANAGEMENT:
     ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
     ./run.sh portfolio list
+    ./run.sh portfolio info <portfolio_id_or_name>
+    ./run.sh portfolio info <portfolio_id_or_name> --analytics
     ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
     ./run.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
     ./run.sh portfolio tickers <portfolio_id>
@@ -1253,7 +1255,7 @@ def main():
     screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
     # Portfolio management (grouped subcommands)
-    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
+    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, info, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
     port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
 
     # portfolio create
@@ -1263,6 +1265,11 @@ def main():
 
     # portfolio list
     p_list = port_sub.add_parser('list', help='List all portfolios')
+
+    # portfolio info
+    p_info = port_sub.add_parser('info', help='Get comprehensive portfolio information with current prices and analytics')
+    p_info.add_argument('portfolio_id', help='Portfolio ID or name')
+    p_info.add_argument('--analytics', action='store_true', help='Include advanced analytics and insights')
 
     # portfolio add ticker
     p_add = port_sub.add_parser('add', help='Add a ticker to a portfolio')
@@ -1634,6 +1641,148 @@ def main():
             elif cmd == 'list':
                 portfolios = engine.get_portfolios()
                 format_portfolio_table(portfolios)
+
+            elif cmd == 'info':
+                # Handle portfolio identification by ID or name
+                portfolio_id = args.portfolio_id
+                portfolio = None
+
+                # Try to get by ID first
+                portfolio = engine.portfolio_model.get_by_id(portfolio_id)
+
+                # If not found by ID, try by name
+                if not portfolio:
+                    portfolio = engine.portfolio_model.get_by_name(portfolio_id)
+                    if portfolio:
+                        portfolio_id = portfolio['id']
+
+                if not portfolio:
+                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    return
+
+                # Get portfolio info
+                result = engine.get_portfolio_info(portfolio_id)
+                if result.get('success'):
+                    data = result['data']
+                    portfolio_info = data['portfolio']
+
+                    # Display portfolio metadata
+                    print(f"📁 Portfolio Information: {portfolio_info['name']}")
+                    print(f"   ID: {portfolio_info['id']}")
+                    print(f"   Description: {portfolio_info.get('description', 'No description')}")
+                    print(f"   Created: {portfolio_info.get('created_at', 'Unknown')}")
+                    print(f"   Last Updated: {portfolio_info.get('updated_at', 'Unknown')}")
+
+                    # Display financial summary
+                    summary = data.get('summary', {})
+                    print(f"\n💰 Financial Summary:")
+                    print(f"   Total Tickers: {summary.get('total_tickers', 0)}")
+                    print(f"   Total Current Value: ${summary.get('total_current_value', 0):,.2f}")
+                    print(f"   Total Cost Basis: ${summary.get('total_cost', 0):,.2f}")
+                    print(f"   Total P&L: ${summary.get('total_unrealized_pnl', 0):+,.2f}")
+                    print(f"   Portfolio Return: {summary.get('portfolio_percentage_change', 0):+.2f}%")
+
+                    # Display accuracy metrics if available
+                    accuracy = data.get('accuracy_metrics', {})
+                    if accuracy.get('total_predictions', 0) > 0:
+                        print(f"\n📊 Prediction Accuracy:")
+                        print(f"   Average Accuracy: {accuracy.get('avg_accuracy', 0):.1%}")
+                        print(f"   Total Predictions: {accuracy.get('total_predictions', 0)}")
+                        print(f"   Accuracy Range: {accuracy.get('min_accuracy', 0):.1%} - {accuracy.get('max_accuracy', 0):.1%}")
+
+                    # Display tickers table
+                    tickers = data.get('tickers', [])
+                    if tickers:
+                        print(f"\n📊 Holdings:")
+                        print("┌─────────┬──────────┬─────────────┬─────────────┬─────────────┬─────────────────┐")
+                        print("│ Ticker  │ Quantity │ Avg Cost    │ Current $   │ Current Val │ P&L (%)         │")
+                        print("├─────────┼──────────┼─────────────┼─────────────┼─────────────┼─────────────────┤")
+
+                        for ticker_info in tickers:
+                            ticker = ticker_info['ticker'][:8]
+                            quantity = f"{ticker_info.get('quantity', 0):.2f}"[:9]
+                            avg_cost = f"${ticker_info.get('avg_cost', 0):.2f}"[:10]
+                            current_price = f"${ticker_info.get('current_price', 0):.2f}"[:10]
+                            current_value = f"${ticker_info.get('current_value', 0):,.0f}"[:10]
+
+                            pnl = ticker_info.get('unrealized_pnl', 0) or 0
+                            pct_change = ticker_info.get('percentage_change', 0) or 0
+
+                            if pnl >= 0:
+                                pnl_display = f"+${pnl:,.0f} (+{pct_change:.1f}%)"[:15]
+                            else:
+                                pnl_display = f"-${abs(pnl):,.0f} ({pct_change:.1f}%)"[:15]
+
+                            print(f"│ {ticker:7} │ {quantity:8} │ {avg_cost:11} │ {current_price:11} │ {current_value:11} │ {pnl_display:15} │")
+
+                        print("└─────────┴──────────┴─────────────┴─────────────┴─────────────┴─────────────────┘")
+
+                    # Display recent changes if any
+                    recent_changes = data.get('recent_changes', [])
+                    if recent_changes:
+                        print(f"\n📈 Recent Changes (Last 30 days):")
+                        print("┌─────────┬─────────────┬─────────────────────┬───────────────────────────┐")
+                        print("│ Ticker  │ Action      │ Date                │ Notes                     │")
+                        print("├─────────┼─────────────┼─────────────────────┼───────────────────────────┤")
+
+                        for change in recent_changes[:10]:  # Show last 10 changes
+                            ticker = change['ticker'][:8]
+                            action = change['transaction_type'][:10]
+                            date = change['change_date'][:19]
+                            notes = (change.get('notes', '') or '')[:25]
+                            print(f"│ {ticker:7} │ {action:11} │ {date:19} │ {notes:25} │")
+
+                        print("└─────────┴─────────────┴─────────────────────┴───────────────────────────┘")
+
+                    # Show analytics if requested
+                    if args.analytics:
+                        analytics_result = engine.get_portfolio_analytics(portfolio_id)
+                        if analytics_result.get('success'):
+                            analytics = analytics_result['data']
+                            print(f"\n📈 Portfolio Analytics:")
+
+                            # Portfolio summary
+                            summary = analytics.get('portfolio_summary', {})
+                            print(f"   📊 Holdings: {summary.get('total_holdings', 0)} positions")
+                            print(f"   💰 Total Value: ${summary.get('total_value', 0):,.2f}")
+                            print(f"   📈 Total Return: {summary.get('total_return_pct', 0):+.2f}%")
+
+                            # Risk assessment
+                            risk = analytics.get('risk_assessment', {})
+                            print(f"   ⚠️ Overall Risk: {risk.get('overall_risk', 'N/A')}")
+                            print(f"   🎯 Concentration Risk: {risk.get('concentration_risk', 'N/A')}")
+                            print(f"   📊 Diversification Score: {risk.get('diversification_score', 0):.0f}/100")
+
+                            # Top holdings composition
+                            composition = analytics.get('composition', [])
+                            if composition:
+                                print(f"\n   🔝 Top Holdings:")
+                                for i, holding in enumerate(composition[:5], 1):
+                                    weight = holding['weight']
+                                    ticker = holding['ticker']
+                                    value = holding['value']
+                                    print(f"      {i}. {ticker}: {weight:.1f}% (${value:,.0f})")
+
+                            # Analysis-based metrics (if available)
+                            analysis_metrics = analytics.get('analysis_based_metrics', {})
+                            if analysis_metrics.get('has_analysis_data'):
+                                recommendations = analysis_metrics.get('recommendation_distribution', [])
+                                if recommendations:
+                                    print(f"\n   🎯 Analysis Recommendations:")
+                                    for rec in recommendations:
+                                        if rec.get('recommendation'):
+                                            print(f"      {rec['recommendation']}: {rec['count']} position(s)")
+                            else:
+                                print(f"\n   💡 Run portfolio analysis to get AI-powered recommendations")
+                        else:
+                            print(f"\n📈 Analytics unavailable: {analytics_result.get('error', 'Unknown error')}")
+                    else:
+                        print(f"\n💡 Use --analytics flag for detailed portfolio analytics")
+
+                else:
+                    print(f"❌ Failed to get portfolio info: {result.get('message')}")
+                    if result.get('error'):
+                        print(f"   Error: {result['error']}")
 
             elif cmd == 'add':
                 result = engine.add_ticker_to_portfolio(

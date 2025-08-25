@@ -452,6 +452,88 @@ class ClariFiEngine:
                 "message": f"Failed to update ticker: {str(e)}"
             }
 
+    def get_portfolio_info(self, portfolio_id: str) -> Dict[str, Any]:
+        """Get comprehensive portfolio information"""
+        command_id = self.log_command("get_portfolio_info", {"portfolio_id": portfolio_id})
+
+        try:
+            # Get comprehensive portfolio information from database
+            portfolio_info = self.portfolio_model.get_portfolio_info(portfolio_id)
+
+            if "error" in portfolio_info:
+                return {
+                    "success": False,
+                    "error": portfolio_info["error"],
+                    "message": portfolio_info["error"]
+                }
+
+            # Update current prices for all tickers if needed
+            for ticker_info in portfolio_info['tickers']:
+                ticker = ticker_info['ticker']
+                try:
+                    # Get latest price data using period parameter with None for start/end dates
+                    stock_data = self.downloader.download_stock_data(ticker, None, None, period="1d")
+                    if stock_data is not None and not stock_data.empty:
+                        current_price = float(stock_data['Close'].iloc[-1])
+                        # Update price in database
+                        self.portfolio_model.update_ticker_price(portfolio_id, ticker, current_price)
+                        # Update the info with fresh price
+                        ticker_info['current_price'] = current_price
+                        if ticker_info['quantity']:
+                            ticker_info['current_value'] = current_price * ticker_info['quantity']
+                            if ticker_info['avg_cost']:
+                                ticker_info['unrealized_pnl'] = (current_price - ticker_info['avg_cost']) * ticker_info['quantity']
+                                ticker_info['percentage_change'] = ((current_price - ticker_info['avg_cost']) / ticker_info['avg_cost']) * 100
+                except Exception as price_error:
+                    print(f"Warning: Could not update price for {ticker}: {price_error}")
+
+            # Recalculate summary with updated prices
+            total_current_value = sum(t.get('current_value', 0) or 0 for t in portfolio_info['tickers'])
+            total_cost = sum(t.get('total_cost', 0) or 0 for t in portfolio_info['tickers'])
+            total_unrealized_pnl = sum(t.get('unrealized_pnl', 0) or 0 for t in portfolio_info['tickers'])
+            portfolio_percentage_change = 0
+            if total_cost > 0:
+                portfolio_percentage_change = ((total_current_value - total_cost) / total_cost) * 100
+
+            portfolio_info['summary'] = {
+                'total_tickers': len(portfolio_info['tickers']),
+                'total_current_value': round(total_current_value, 2),
+                'total_cost': round(total_cost, 2),
+                'total_unrealized_pnl': round(total_unrealized_pnl, 2),
+                'portfolio_percentage_change': round(portfolio_percentage_change, 2)
+            }
+
+            return {
+                "success": True,
+                "data": portfolio_info
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to get portfolio info: {str(e)}"
+            }
+
+    def get_portfolio_analytics(self, portfolio_id: str) -> Dict[str, Any]:
+        """Get advanced portfolio analytics and insights"""
+        command_id = self.log_command("get_portfolio_analytics", {"portfolio_id": portfolio_id})
+
+        try:
+            analytics = self.portfolio_model.get_portfolio_analytics(portfolio_id)
+
+            return {
+                "success": True,
+                "data": analytics
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Failed to get portfolio analytics: {str(e)}"
+            }
+
     # Analysis Methods
     def comprehensive_analysis(self, tickers: List[str], portfolio_id: str = None,
                              period: str = "1y", save_to_db: bool = True,

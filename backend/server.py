@@ -142,6 +142,30 @@ async def get_portfolio_tickers(portfolio_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/portfolios/{portfolio_id}/info")
+async def get_portfolio_info(portfolio_id: str):
+    """Get comprehensive portfolio information including current prices, analysis, and metrics"""
+    try:
+        result = engine.get_portfolio_info(portfolio_id)
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/portfolios/{portfolio_id}/analytics")
+async def get_portfolio_analytics(portfolio_id: str):
+    """Get advanced portfolio analytics including risk distribution and performance trends"""
+    try:
+        result = engine.get_portfolio_analytics(portfolio_id)
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result["message"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/analysis/comprehensive")
 async def run_comprehensive_analysis(analysis_request: AnalysisRequest, background_tasks: BackgroundTasks):
     """Run comprehensive analysis on tickers"""
