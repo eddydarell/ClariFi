@@ -1,6 +1,7 @@
 # ClariFi Portfolio CLI Commands - New Features
 
 ## Overview
+
 The ClariFi CLI has been enhanced with three new portfolio management commands:
 
 1. **`portfolio update`** - Update portfolio name and/or description
@@ -10,6 +11,7 @@ The ClariFi CLI has been enhanced with three new portfolio management commands:
 ## Command Reference
 
 ### Portfolio Update
+
 Update a portfolio's name and/or description.
 
 ```bash
@@ -24,18 +26,21 @@ Update a portfolio's name and/or description.
 ```
 
 **Example:**
+
 ```bash
 ./run.sh portfolio update a0a5a7ae-4d43-4387-90d4-89cd1ae894bd --name "My Tech Stocks" --description "Large cap technology investments"
 ```
 
 **Output:**
-```
+
+```bash
 ✅ Portfolio updated successfully
    New name: My Tech Stocks
    New description: Large cap technology investments
 ```
 
 ### Portfolio Delete
+
 Safely delete a portfolio with mandatory name confirmation to prevent accidental deletions.
 
 ```bash
@@ -43,17 +48,20 @@ Safely delete a portfolio with mandatory name confirmation to prevent accidental
 ```
 
 **Features:**
+
 - **Case-sensitive confirmation** - Must type exact portfolio name
 - **Warning display** - Shows what will be deleted before proceeding
 - **Cascading deletion** - Removes all associated tickers and analysis history
 
 **Example:**
+
 ```bash
 ./run.sh portfolio delete a0a5a7ae-4d43-4387-90d4-89cd1ae894bd --confirm-name "My Tech Stocks"
 ```
 
 **Output:**
-```
+
+```bash
 ⚠️  WARNING: You are about to delete portfolio 'My Tech Stocks'
    This action is IRREVERSIBLE and will:
    - Delete the portfolio permanently
@@ -65,15 +73,18 @@ Safely delete a portfolio with mandatory name confirmation to prevent accidental
 ```
 
 **Error Example (wrong confirmation):**
+
 ```bash
 ./run.sh portfolio delete a0a5a7ae-4d43-4387-90d4-89cd1ae894bd --confirm-name "wrong name"
 ```
-```
+
+```bash
 ❌ Please type the exact portfolio name 'My Tech Stocks' to confirm deletion
    ⚠️  Portfolio deletion is irreversible and will remove all associated data!
 ```
 
 ### Portfolio Sync
+
 Fetch the most recent market prices for all tickers in a portfolio and update the database.
 
 ```bash
@@ -81,18 +92,21 @@ Fetch the most recent market prices for all tickers in a portfolio and update th
 ```
 
 **Features:**
+
 - **Real-time price fetching** - Uses live market data
 - **Batch processing** - Updates all tickers efficiently
 - **Detailed reporting** - Shows price changes and sync status
 - **Error handling** - Gracefully handles individual ticker failures
 
 **Example:**
+
 ```bash
 ./run.sh portfolio sync a0a5a7ae-4d43-4387-90d4-89cd1ae894bd
 ```
 
 **Output:**
-```
+
+```bash
 🔄 Syncing prices for portfolio 'My Tech Stocks'...
 📥 Fetching current price for AAPL...
 ✅ AAPL: $227.76

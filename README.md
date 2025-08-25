@@ -77,7 +77,7 @@ python3 run_clarifi.py
 
 ### Directory Structure
 
-```
+```bash
 ClariFi/
 ├── 🚀 Application Launchers
 │   ├── run_clarifi.py          # Main application launcher
@@ -261,7 +261,7 @@ for ticker, data in patterns.items():
     print(f"{ticker} worst months: {data['worst_months']}")
 ```
 
-### Real-time Monitoring
+### Real-time Monitoring Setup
 
 Set up live market monitoring:
 

@@ -31,13 +31,13 @@ The Black-Scholes equation is implemented using the standard formula:
 
 **Call Option Price:**
 
-```
+```matlab
 C = S * N(d1) - K * e^(-r*T) * N(d2)
 ```
 
 **Put Option Price:**
 
-```
+```matlab
 P = K * e^(-r*T) * N(-d2) - S * N(-d1)
 ```
 
