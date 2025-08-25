@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 # Add engine to path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from clarifi_engine.engine import ClariFiEngine
+from core.engine import ClariFiEngine
 
 # Initialize FastAPI app
 app = FastAPI(

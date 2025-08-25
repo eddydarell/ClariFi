@@ -11,3 +11,4 @@ websockets>=11.0
 python-multipart>=0.0.6
 colorama>=0.4.6
 plotext>=5.2.8
+ollama>=0.1.0  # optional for AI analysis (local model inference)

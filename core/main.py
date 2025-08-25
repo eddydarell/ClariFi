@@ -1147,6 +1147,13 @@ def main():
   ./run.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
   ./run.sh analyze PLTR --no-investment-advice  # Skip suggestions
 
+🤖 AI-POWERED ANALYSIS (LLM + Quantitative):
+  ./run.sh ai AAPL MSFT --period 6mo      # AI recommendations with backtest
+  ./run.sh ai PLTR TSLA --no-llm          # Quantitative metrics only
+  ./run.sh ai AAPL --show-prompt          # Show LLM prompt for transparency
+  ./run.sh ai <portfolio_id> --period 1y  # Analyze entire portfolio
+  ./run.sh ai NVDA --model qwen2:7b       # Use specific Ollama model
+
 � PORTFOLIO MANAGEMENT:
     ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
     ./run.sh portfolio list
@@ -1192,6 +1199,29 @@ def main():
     analyze_parser.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis')
     analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
     analyze_parser.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
+
+    # AI analysis (LLM powered)
+    ai_parser = subparsers.add_parser(
+        'ai',
+        help='🤖 AI-driven quantitative + LLM recommendations (BUY/SELL/HOLD)',
+        description='Run quantitative factor extraction + optional local LLM synthesis to produce BUY/SELL/HOLD signals.',
+        epilog=(
+            "Examples:\n"
+            "  ./run.sh ai AAPL MSFT --period 6mo\n"
+            "  ./run.sh ai AAPL --show-prompt\n"
+            "  ./run.sh ai PLTR TSLA --no-llm (quant metrics only)\n"
+            "  ./run.sh ai <portfolio_id> --period 1y\n\n"
+            "Metrics included: avg daily return, annualized vol, max drawdown, SMA(50/200) relationship, RSI(14), simple SMA crossover backtest (strategy vs buy&hold), 30‑day trend slope classification.\n"
+            "LLM Prompt: A compact JSON-oriented instruction asking model to emit structured recommendations."
+        )
+    )
+    ai_parser.add_argument('tickers', nargs='+', help='One or more stock tickers or a single portfolio ID')
+    ai_parser.add_argument('--period', '-p', default='1y', help='Historical period to fetch (default: 1y)')
+    ai_parser.add_argument('--no-llm', action='store_true', help='Skip calling the LLM (quant metrics only)')
+    ai_parser.add_argument('--show-prompt', action='store_true', help='Print the generated LLM prompt for transparency')
+    ai_parser.add_argument('--raw-json', action='store_true', help='Print raw JSON response from AI and final prompt')
+    ai_parser.add_argument('--summary-only', action='store_true', help='Only print condensed BUY/SELL/HOLD table')
+    ai_parser.add_argument('--model', default='qwen3:latest', help='Ollama model name (default: qwen3:latest)')
 
     # Seasonal analysis
     seasonal_parser = subparsers.add_parser('seasonal', help='🗓️ Seasonal & holiday analysis')
@@ -1732,6 +1762,7 @@ def main():
                 print(f"💾 CSV export functionality coming soon...")
 
         elif args.command == 'portfolio':
+
             # Ensure an action is provided
             if not args.portfolio_cmd:
                 portfolio_parser.print_help()
@@ -2227,6 +2258,128 @@ def main():
                     print("📈 No accuracy data found")
             else:
                 portfolio_parser.print_help()
+
+        elif args.command == 'ai':
+            # Lazy import to keep base dependencies light
+            try:
+                from ai_analyzer import AIAnalyzer, is_probable_portfolio_identifier
+            except Exception as e:
+                print(f"❌ Failed to load AI analyzer: {e}")
+                return
+
+            call_llm = not args.no_llm
+            model_name = args.model
+            period = args.period
+            raw_inputs = args.tickers
+
+            # Detect portfolio vs ticker list
+            portfolio_id = None
+            tickers = raw_inputs
+            if len(raw_inputs) == 1 and is_probable_portfolio_identifier(raw_inputs[0]):
+                portfolio_id = raw_inputs[0]
+
+            if portfolio_id:
+                if engine is None:
+                    from engine import ClariFiEngine  # local import
+                    engine = ClariFiEngine()
+                try:
+                    tdata = engine.get_portfolio_tickers(portfolio_id)
+                    if not tdata:
+                        print(f"❌ Portfolio {portfolio_id} has no tickers")
+                        return
+                    tickers = [t['ticker'] for t in tdata]
+                    print(f"📁 Using portfolio {portfolio_id} with {len(tickers)} tickers")
+                except Exception as e:
+                    print(f"❌ Failed to load portfolio: {e}")
+                    return
+
+            analyzer = AIAnalyzer(model=model_name)
+            print(f"🤖 Running AI quantitative analysis for: {', '.join(tickers)} (period {period})")
+            if not call_llm:
+                print("🧪 LLM call disabled (--no-llm)")
+
+            result = analyzer.analyze(tickers, period=period, call_model=call_llm)
+
+            analyses = result.get('analyses', [])
+            if not analyses:
+                print("❌ No analyses produced")
+                if result.get('errors'):
+                    print("Errors:")
+                    for k, v in result['errors'].items():
+                        print(f"  {k}: {v}")
+                return
+
+            # Optional prompt transparency
+            if args.show_prompt:
+                print("\n📝 Prompt sent to LLM (quantitative basis):\n")
+                print(result.get('prompt', ''))
+
+            # Optional raw JSON output
+            if args.raw_json:
+                print("\n🔧 Raw AI Response Debug Information:")
+                print("=" * 50)
+                print("FINAL PROMPT:")
+                print(result.get('prompt', ''))
+                print("\n" + "=" * 50)
+                print("RAW LLM RESPONSE:")
+                print(result.get('llm_raw', 'No LLM response'))
+                print("\n" + "=" * 50)
+                print("PARSED JSON:")
+                import json
+                llm_data = result.get('llm', {})
+                print(json.dumps(llm_data.get('parsed', {}), indent=2))
+                if llm_data.get('validation_errors'):
+                    print("\nVALIDATION ERRORS:")
+                    for error in llm_data['validation_errors']:
+                        print(f"  - {error}")
+                print("=" * 50)
+                return  # Exit early if user just wants raw output
+
+            import math
+            # Summary table
+            print("\n📊 Quantitative Metrics (per ticker):")
+            header = (
+                "Ticker  Last  AvgDaily%  AnnVol%  MaxDD%  SMA50/200%  RSI14  BT_Str%  BT_Excess%  Trend"
+            )
+            print(header)
+            print("-" * len(header))
+            for a in analyses:
+                bt = a.get('backtest') or {}
+                print(
+                    f"{a['ticker']:<6} {a['last_price']:<5.2f} {a['avg_daily_return_pct']:<9.2f} {a['vol_annualized_pct']:<7.2f} {a['max_drawdown_pct']:<7.2f} "
+                    f"{(a['sma50_vs_200_pct'] if a['sma50_vs_200_pct'] is not None else float('nan')):<11.2f} {a['rsi_14']:<6.1f} "
+                    f"{bt.get('strategy_return_pct', float('nan')):<8.2f} {bt.get('excess_return_pct', float('nan')):<11.2f} {a['quantitative_trend']}"
+                )
+
+            llm_parsed = (result.get('llm') or {}).get('parsed')
+            if call_llm and llm_parsed:
+                print("\n🎯 AI Recommendations:")
+                tick_list = llm_parsed.get('tickers') or []
+                if tick_list:
+                    print("Ticker  Recommendation")
+                    print("----------------------")
+                    for t in tick_list:
+                        print(f"{t.get('ticker','?'):<7} {t.get('recommendation','?')}")
+                overall = llm_parsed.get('overall')
+                if overall:
+                    print("\nOverall Stance:", overall.get('stance'))
+                    notes = overall.get('notes') or []
+                    for n in notes[:5]:
+                        print(" -", n)
+
+                if not args.summary_only:
+                    # Show rationale details if available
+                    for t in tick_list:
+                        rationale = t.get('rationale') or []
+                        if rationale:
+                            print(f"\n{t.get('ticker')} Rationale:")
+                            for r in rationale[:5]:
+                                print(" -", r)
+
+            if result.get('errors'):
+                print("\n⚠️  Non-fatal errors:")
+                for k, v in result['errors'].items():
+                    print(f"  {k}: {v}")
 
     except KeyboardInterrupt:
         print("\n⚠️  Operation cancelled by user")

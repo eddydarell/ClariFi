@@ -125,6 +125,95 @@ ClariFi/
 
 ## 💡 Usage Examples
 
+### 🤖 AI Analyzer (LLM + Quantitative Backtesting)
+
+The AI Analyzer blends deterministic quantitative metrics with an optional local LLM (via **Ollama**) to produce concise BUY / SELL / HOLD recommendations with structured, consistent output.
+
+Key quantitative inputs per ticker:
+
+- Last price, average daily return, annualized volatility
+- Maximum drawdown (risk) and 50/200 SMA relationship (momentum / regime)
+- RSI(14) (overbought/oversold context)
+- Lightweight SMA(20/50) crossover backtest: strategy vs buy & hold return, excess alpha, trade count, win rate
+- 30‑day regression trend classification (UP / DOWN / FLAT)
+- Calculated Sharpe ratio for risk-adjusted performance evaluation
+
+**Enhanced Features (v2.0)**:
+
+- 🔧 **Structured JSON Schema**: Consistent response format across all LLM models
+- 📝 **Enhanced Prompts**: Precise instructions with decision criteria and confidence levels
+- 🔍 **Response Validation**: Schema validation with fallback parsing for robust operation
+- 🐛 **Debug Mode**: Raw JSON output with full prompt transparency
+
+Recommendation generation steps:
+
+1. Fetch historical price data (default 1y, configurable with `--period`).
+2. Compute metrics + run internal SMA crossover backtest with risk-adjusted analysis.
+3. Assemble a structured prompt with explicit JSON schema and decision criteria.
+4. (Optional) Call local LLM model (default `qwen3:latest`) through Ollama with optimized parameters.
+5. Parse and validate structured JSON response with confidence levels and rationale.
+
+Usage:
+
+```bash
+# Multiple tickers with enhanced analysis
+./run.sh ai AAPL MSFT NVDA --period 6mo
+
+# Quant metrics only (skip LLM model)
+./run.sh ai PLTR TSLA --no-llm
+
+# Show the structured prompt sent to the model
+./run.sh ai AAPL --show-prompt
+
+# Debug mode: see raw JSON response and validation
+./run.sh ai AAPL --raw-json
+
+# Analyze a portfolio by its ID (UUID-like)
+./run.sh ai 123e4567-e89b-12d3-a456-426614174000 --period 1y
+
+# Use a different local model (must be pulled in Ollama first)
+./run.sh ai AAPL MSFT --model qwen2:7b
+```
+
+Flags:
+
+- `--period <range>`: Historical period (e.g. 6mo, 1y, 2y).
+- `--no-llm`: Skip model call; still prints quantitative table & backtest metrics.
+- `--show-prompt`: Display structured prompt for auditability & debugging.
+- `--raw-json`: Show raw AI response, final prompt, and validation results.
+- `--summary-only`: Hide rationale details and show compact output.
+- `--model <name>`: Specify Ollama model tag (default `qwen3:latest`).
+
+**Structured Output Format**:
+
+The AI now returns consistent JSON with:
+
+- **Per-ticker analysis**: Recommendation (BUY/SELL/HOLD), rationale (1-3 bullet points), confidence level (HIGH/MEDIUM/LOW)
+- **Overall portfolio stance**: BULLISH/BEARISH/NEUTRAL with market outlook (FAVORABLE/CAUTIOUS/UNFAVORABLE)
+- **Decision transparency**: Clear criteria for each recommendation type
+- **Validation**: Schema compliance checking with error reporting
+
+Output Sections:
+
+1. **Quantitative Metrics Table** – raw computed factors & backtest results including Sharpe ratios.
+2. **AI Recommendations** – structured per-ticker BUY/SELL/HOLD with confidence and rationale.
+3. **Overall Portfolio Analysis** – aggregated stance and market outlook.
+4. **Non‑fatal Errors** – e.g. missing model, insufficient data, validation issues.
+
+Requirements:
+
+- Local Ollama installed & running (`ollama run qwen3:latest` to pre-pull the model).
+- Python `ollama` client installed (already in `requirements.txt`).
+
+Graceful Degradation:
+
+- If Ollama or the model is unavailable, the command still returns quantitative metrics and clearly reports the issue.
+- Schema validation failures trigger fallback parsing to ensure recommendations are always extracted.
+
+Disclaimer: The AI Analyzer provides heuristic + LLM synthesized suggestions and is NOT financial advice.
+
+---
+
 ### Web Interface (Recommended)
 
 1. **Launch the application**:
