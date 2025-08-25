@@ -1086,10 +1086,13 @@ def main():
 🔬 COMPREHENSIVE ANALYSIS (Advanced):
   ./run.sh analyze PLTR QBTS AAPL --period 1y
   ./run.sh analyze "SAAB B" NANEXA --period 6mo --no-events
+  ./run.sh analyze <portfolio_id_or_name> --period 1y --include-deep
+  ./run.sh analyze MyPortfolio --period 6mo --summary-only
 
 🔁 DEEP BACKTESTING ANALYSIS:
   ./run.sh analyze AAPL MSFT --period 5y --include-deep
   ./run.sh analyze PLTR --period 3y --include-deep --deep-chunk-months 6
+  ./run.sh analyze <portfolio_id> --include-deep --deep-chunk-months 3
 
 📈 PATTERN ANALYSIS:
   ./run.sh patterns AAPL MSFT GOOGL --period 2y
@@ -1151,10 +1154,15 @@ def main():
     ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
     ./run.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
     ./run.sh portfolio tickers <portfolio_id>
-    ./run.sh portfolio analyze <portfolio_id> --period 6mo --summary-only
+    ./run.sh portfolio analyze <portfolio_id> --period 6mo --include-deep
+    ./run.sh portfolio analyze <portfolio_id> --summary-only
     ./run.sh portfolio remove <portfolio_id> AAPL
     ./run.sh portfolio history --portfolio-id <portfolio_id> --limit 5
     ./run.sh portfolio accuracy --portfolio-id <portfolio_id>
+
+📊 PORTFOLIO ANALYSIS (Simplified):
+    ./run.sh analyze <portfolio_id_or_name> --period 1y
+    ./run.sh analyze MyPortfolio --include-deep --deep-chunk-months 3
 
 �💡 TIP: Use quotes for tickers with spaces: "SAAB B"
         """
@@ -1171,7 +1179,7 @@ def main():
 
     # NEW: Comprehensive analysis
     analyze_parser = subparsers.add_parser('analyze', help='🔬 Comprehensive market analysis')
-    analyze_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
+    analyze_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols or portfolio ID')
     analyze_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
     analyze_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
     analyze_parser.add_argument('--no-patterns', action='store_true', help='Skip pattern analysis')
@@ -1182,6 +1190,7 @@ def main():
     analyze_parser.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
     analyze_parser.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis')
     analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
+    analyze_parser.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
 
     # Seasonal analysis
     seasonal_parser = subparsers.add_parser('seasonal', help='🗓️ Seasonal & holiday analysis')
@@ -1317,6 +1326,8 @@ def main():
     p_analyze.add_argument('--no-events', action='store_true', help='Skip event correlation')
     p_analyze.add_argument('--no-options', action='store_true', help='Skip options analysis')
     p_analyze.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
+    p_analyze.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis')
+    p_analyze.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
     p_analyze.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
 
     # portfolio history (analysis history)
@@ -1368,19 +1379,169 @@ def main():
             )
 
         elif args.command == 'analyze':
-            analysis.comprehensive_analysis(
-                args.tickers,
-                args.period,
-                download=not args.no_download,
-                include_patterns=not args.no_patterns,
-                include_events=not args.no_events,
-                include_advanced_viz=not args.no_advanced_viz,
-                include_options=not args.no_options,
-                include_investment_advice=not args.no_investment_advice,
-                include_seasonal=not args.no_seasonal,
-                include_deep=args.include_deep,
-                deep_chunk_months=args.deep_chunk_months
-            )
+            # Lazy initialize engine if needed for portfolio lookup
+            if engine is None:
+                try:
+                    from clarifi_engine.engine import ClariFiEngine  # when package is recognized
+                except ImportError:
+                    try:
+                        from engine import ClariFiEngine  # local module import
+                    except ImportError:
+                        print("❌ ClariFiEngine not available. Running legacy analysis instead.")
+                        # Fallback to legacy analysis
+                        analysis.comprehensive_analysis(
+                            args.tickers,
+                            args.period,
+                            download=not args.no_download,
+                            include_patterns=not args.no_patterns,
+                            include_events=not args.no_events,
+                            include_advanced_viz=not args.no_advanced_viz,
+                            include_options=not args.no_options,
+                            include_investment_advice=not args.no_investment_advice,
+                            include_seasonal=not args.no_seasonal,
+                            include_deep=args.include_deep,
+                            deep_chunk_months=args.deep_chunk_months
+                        )
+                        return
+
+                engine = ClariFiEngine()
+
+            # Check if the first argument is a portfolio ID (UUID format)
+            first_arg = args.tickers[0]
+            is_portfolio_id = False
+            portfolio_tickers = None
+
+            # Check if it looks like a UUID (36 chars with hyphens)
+            if len(first_arg) == 36 and first_arg.count('-') == 4:
+                try:
+                    # Try to get portfolio by ID
+                    portfolio = engine.portfolio_model.get_by_id(first_arg)
+                    if portfolio:
+                        is_portfolio_id = True
+                        portfolio_id = first_arg
+                        tickers_data = engine.get_portfolio_tickers(portfolio_id)
+                        portfolio_tickers = [t['ticker'] for t in tickers_data]
+                        if not portfolio_tickers:
+                            print(f"❌ No tickers in portfolio {portfolio_id[:8]}...")
+                            return
+                        print(f"🚀 Analyzing portfolio {portfolio_id[:8]}...")
+                        print(f"📊 Tickers: {', '.join(portfolio_tickers)}")
+                        print(f"📅 Period: {args.period}")
+                except Exception:
+                    # Not a valid portfolio ID, treat as ticker
+                    pass
+
+            # If not a portfolio ID, try to find by name
+            if not is_portfolio_id and len(args.tickers) == 1:
+                try:
+                    portfolio = engine.portfolio_model.get_by_name(first_arg)
+                    if portfolio:
+                        is_portfolio_id = True
+                        portfolio_id = portfolio['id']
+                        tickers_data = engine.get_portfolio_tickers(portfolio_id)
+                        portfolio_tickers = [t['ticker'] for t in tickers_data]
+                        if not portfolio_tickers:
+                            print(f"❌ No tickers in portfolio '{first_arg}'")
+                            return
+                        print(f"🚀 Analyzing portfolio '{first_arg}' ({portfolio_id[:8]}...)")
+                        print(f"📊 Tickers: {', '.join(portfolio_tickers)}")
+                        print(f"📅 Period: {args.period}")
+                except Exception:
+                    # Not a valid portfolio name, treat as ticker
+                    pass
+
+            if is_portfolio_id:
+                # Portfolio analysis using engine
+                result = engine.comprehensive_analysis(
+                    tickers=portfolio_tickers,
+                    portfolio_id=portfolio_id,
+                    period=args.period,
+                    include_patterns=not args.no_patterns,
+                    include_events=not args.no_events,
+                    include_options=not args.no_options,
+                    include_seasonal=not args.no_seasonal,
+                    include_deep=args.include_deep,
+                    deep_chunk_months=args.deep_chunk_months
+                )
+
+                if result.get('success'):
+                    if args.summary_only:
+                        print("\n📋 Portfolio Analysis Summary:")
+                    else:
+                        print("\n📋 Portfolio Analysis Complete:")
+
+                    # Check if deep analysis was included
+                    has_deep_results = any('deep_analysis' in data for data in result['results'].values())
+
+                    if has_deep_results:
+                        print("┌─────────┬──────────────┬────────────┬─────────────┬─────────────────┐")
+                        print("│ Ticker  │ Recomm.      │ Confidence │ Risk Level  │ Accuracy        │")
+                        print("├─────────┼──────────────┼────────────┼─────────────┼─────────────────┤")
+                    else:
+                        print("┌─────────┬──────────────┬────────────┬─────────────┐")
+                        print("│ Ticker  │ Recomm.      │ Confidence │ Risk Level  │")
+                        print("├─────────┼──────────────┼────────────┼─────────────┤")
+
+                    for tk, data in result['results'].items():
+                        rec = data.get('overall_recommendation', 'N/A')
+                        conf = data.get('confidence_level', 'N/A')
+                        risk = data.get('risk_level', 'N/A')
+
+                        # Get precision if available
+                        precision = None
+                        if 'coefficient_of_precision' in data:
+                            precision = data['coefficient_of_precision']
+                        elif 'deep_analysis' in data and isinstance(data['deep_analysis'], dict):
+                            deep_summary = data['deep_analysis'].get('summary', {})
+                            precision = deep_summary.get('coefficient_of_precision')
+
+                        # Add emoji based on recommendation and precision
+                        if rec == 'BUY':
+                            if precision and precision > 0.7:
+                                emoji = "🟢💎"
+                            elif precision and precision > 0.5:
+                                emoji = "🟢📊"
+                            else:
+                                emoji = "🟢"
+                        elif rec == 'SELL':
+                            emoji = "🔴"
+                        elif rec == 'HOLD':
+                            emoji = "🟡"
+                        else:
+                            emoji = "⚪"
+
+                        if has_deep_results:
+                            precision_str = f"{precision:.1%}" if precision is not None else "N/A"
+                            print(f"│ {tk:7} │ {emoji} {rec:9} │ {conf:10} │ {risk:11} │ {precision_str:15} │")
+                        else:
+                            print(f"│ {tk:7} │ {emoji} {rec:9} │ {conf:10} │ {risk:11} │")
+
+                    if has_deep_results:
+                        print("└─────────┴──────────────┴────────────┴─────────────┴─────────────────┘")
+                    else:
+                        print("└─────────┴──────────────┴────────────┴─────────────┘")
+
+                    if not args.summary_only:
+                        import json
+                        print("\n🔍 Raw JSON data:")
+                        print(json.dumps(result, indent=2))
+                else:
+                    print(f"❌ Analysis failed: {result.get('error')}")
+            else:
+                # Regular ticker analysis using legacy system
+                analysis.comprehensive_analysis(
+                    args.tickers,
+                    args.period,
+                    download=not args.no_download,
+                    include_patterns=not args.no_patterns,
+                    include_events=not args.no_events,
+                    include_advanced_viz=not args.no_advanced_viz,
+                    include_options=not args.no_options,
+                    include_investment_advice=not args.no_investment_advice,
+                    include_seasonal=not args.no_seasonal,
+                    include_deep=args.include_deep,
+                    deep_chunk_months=args.deep_chunk_months
+                )
 
         elif args.command == 'seasonal':
             analysis.seasonal_only(
@@ -1932,10 +2093,15 @@ def main():
                     include_patterns=not args.no_patterns,
                     include_events=not args.no_events,
                     include_options=not args.no_options,
-                    include_seasonal=not args.no_seasonal
+                    include_seasonal=not args.no_seasonal,
+                    include_deep=args.include_deep,
+                    deep_chunk_months=args.deep_chunk_months
                 )
                 if result.get('success'):
-                    print("\n📋 Portfolio Analysis Summary:")
+                    if args.summary_only:
+                        print("\n📋 Portfolio Analysis Summary:")
+                    else:
+                        print("\n📋 Portfolio Analysis Complete:")
 
                     # Check if deep analysis was included
                     has_deep_results = any('deep_analysis' in data for data in result['results'].values())

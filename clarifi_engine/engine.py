@@ -51,50 +51,93 @@ class ClariFiEngine:
 
     def _make_json_serializable(self, obj):
         """Convert pandas objects and numpy types to JSON-serializable Python types."""
-        if obj is None:
-            return None
-        elif isinstance(obj, pd.Series):
-            # Convert Series to dict with string keys to avoid serialization issues
-            try:
-                return obj.to_dict()
-            except:
-                # Fallback to list if to_dict() fails
-                return obj.tolist()
-        elif isinstance(obj, pd.DataFrame):
-            try:
-                return obj.to_dict(orient='records')
-            except:
-                # Fallback to dict conversion
-                return obj.to_dict()
-        elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+        try:
+            if obj is None:
+                return None
+            elif isinstance(obj, pd.Series):
+                # Convert Series to dict with string keys to avoid serialization issues
+                try:
+                    # Handle datetime index specially
+                    if isinstance(obj.index, pd.DatetimeIndex):
+                        return {str(k): self._make_json_serializable(v) for k, v in obj.to_dict().items()}
+                    else:
+                        return {str(k): self._make_json_serializable(v) for k, v in obj.to_dict().items()}
+                except Exception:
+                    # Fallback to list if to_dict() fails
+                    try:
+                        return [self._make_json_serializable(item) for item in obj.tolist()]
+                    except Exception:
+                        return str(obj)
+            elif isinstance(obj, pd.DataFrame):
+                try:
+                    records = obj.to_dict(orient='records')
+                    return [self._make_json_serializable(record) for record in records]
+                except Exception:
+                    # Fallback to dict conversion
+                    try:
+                        return self._make_json_serializable(obj.to_dict())
+                    except Exception:
+                        return str(obj)
+            elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+                return str(obj)
+            elif isinstance(obj, (datetime, timedelta)):
+                return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
+            elif isinstance(obj, (np.integer, int)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, float)):
+                # Handle NaN and infinity
+                val = float(obj)
+                if np.isnan(val) or np.isinf(val):
+                    return None
+                return val
+            elif isinstance(obj, np.ndarray):
+                try:
+                    return [self._make_json_serializable(item) for item in obj.tolist()]
+                except Exception:
+                    return str(obj)
+            elif isinstance(obj, (np.bool_, bool)):
+                return bool(obj)
+            elif isinstance(obj, (np.str_, str)):
+                return str(obj)
+            elif isinstance(obj, bytes):
+                return obj.decode('utf-8', errors='ignore')
+            elif isinstance(obj, dict):
+                try:
+                    return {str(key): self._make_json_serializable(value) for key, value in obj.items()}
+                except Exception:
+                    return str(obj)
+            elif isinstance(obj, (list, tuple, set)):
+                try:
+                    return [self._make_json_serializable(item) for item in obj]
+                except Exception:
+                    return str(obj)
+            elif hasattr(obj, '__dict__'):
+                # Handle custom class objects by converting their attributes to dict
+                try:
+                    result = {}
+                    for attr in dir(obj):
+                        if not attr.startswith('_'):
+                            try:
+                                value = getattr(obj, attr)
+                                if not callable(value):
+                                    result[attr] = self._make_json_serializable(value)
+                            except Exception:
+                                continue
+                    return result
+                except Exception:
+                    return str(obj)
+            else:
+                # Try to convert to string if all else fails
+                try:
+                    # Check if it's JSON serializable first
+                    import json
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, ValueError):
+                    return str(obj)
+        except Exception:
+            # Ultimate fallback
             return str(obj)
-        elif isinstance(obj, (datetime, timedelta)):
-            return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
-        elif isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.bool_, bool)):
-            return bool(obj)
-        elif isinstance(obj, dict):
-            return {str(key): self._make_json_serializable(value) for key, value in obj.items()}
-        elif isinstance(obj, (list, tuple)):
-            return [self._make_json_serializable(item) for item in obj]
-        elif hasattr(obj, '__dict__'):
-            # Handle custom class objects by converting their attributes to dict
-            try:
-                return {attr: self._make_json_serializable(getattr(obj, attr))
-                        for attr in dir(obj) if not attr.startswith('_') and not callable(getattr(obj, attr))}
-            except:
-                return str(obj)
-        else:
-            # Try to convert to string if all else fails
-            try:
-                return obj
-            except:
-                return str(obj)
 
     def log_command(self, command: str, parameters: Dict[str, Any] = None) -> str:
         """Log command execution"""
@@ -559,116 +602,143 @@ class ClariFiEngine:
 
         try:
             for ticker in tickers:
-                print(f"\n🔍 Analyzing {ticker}...")
-                ticker_results = {}
+                try:
+                    print(f"\n🔍 Analyzing {ticker}...")
+                    ticker_results = {}
 
-                # Download data
-                print(f"📥 Downloading data for {ticker}...")
-                stock_data = self.downloader.download_stock_data(ticker, None, None, period=period)
+                    # Download data
+                    print(f"📥 Downloading data for {ticker}...")
+                    stock_data = self.downloader.download_stock_data(ticker, None, None, period=period)
 
-                if stock_data is None:
-                    ticker_results["error"] = f"Failed to download data for {ticker}"
-                    results[ticker] = ticker_results
-                    continue
+                    if stock_data is None:
+                        print(f"⚠️  Warning: No data found for ticker {ticker}")
+                        ticker_results["error"] = f"Failed to download data for {ticker}"
+                        results[ticker] = ticker_results
+                        continue
 
-                # Save the downloaded data for analysis
-                saved_file = self.downloader.save_to_csv(stock_data, ticker)
-                if not saved_file:
-                    ticker_results["error"] = f"Failed to save data for {ticker}"
-                    results[ticker] = ticker_results
-                    continue
+                    # Save the downloaded data for analysis
+                    saved_file = self.downloader.save_to_csv(stock_data, ticker)
+                    if not saved_file:
+                        print(f"⚠️  Warning: Failed to save data for {ticker}")
+                        ticker_results["error"] = f"Failed to save data for {ticker}"
+                        results[ticker] = ticker_results
+                        continue
 
-                # Pattern Analysis
-                if include_patterns:
-                    print(f"📊 Running pattern analysis for {ticker}...")
-                    try:
-                        stock_data_dict = {ticker: stock_data}
-                        pattern_data = self.pattern_analyzer.analyze_correlation_patterns(stock_data_dict)
-                        ticker_results["patterns"] = pattern_data
-                    except Exception as e:
-                        ticker_results["patterns"] = {"error": f"Pattern analysis failed: {str(e)}"}
-
-                # Event Correlation
-                if include_events:
-                    print(f"📰 Running event correlation analysis for {ticker}...")
-                    try:
-                        stock_data_dict = {ticker: stock_data}
-                        event_data = self.event_correlator.correlate_events_with_movements(stock_data_dict)
-
-                        # Make event data JSON serializable if needed
+                    # Pattern Analysis
+                    if include_patterns:
+                        print(f"📊 Running pattern analysis for {ticker}...")
                         try:
-                            import json
-                            json.dumps(event_data, default=str)
-                        except Exception:
-                            event_data = self._make_json_serializable(event_data)
+                            stock_data_dict = {ticker: stock_data}
+                            pattern_data = self.pattern_analyzer.analyze_correlation_patterns(stock_data_dict)
+                            # Ensure JSON serializable
+                            ticker_results["patterns"] = self._make_json_serializable(pattern_data)
+                        except Exception as e:
+                            print(f"⚠️  Pattern analysis failed for {ticker}: {str(e)}")
+                            ticker_results["patterns"] = {"error": f"Pattern analysis failed: {str(e)}"}
 
-                        ticker_results["events"] = event_data
+                    # Event Correlation
+                    if include_events:
+                        print(f"📰 Running event correlation analysis for {ticker}...")
+                        try:
+                            stock_data_dict = {ticker: stock_data}
+                            event_data = self.event_correlator.correlate_events_with_movements(stock_data_dict)
+                            # Ensure JSON serializable
+                            ticker_results["events"] = self._make_json_serializable(event_data)
+                        except Exception as e:
+                            print(f"⚠️  Event analysis failed for {ticker}: {str(e)}")
+                            ticker_results["events"] = {"error": f"Event analysis failed: {str(e)}"}
 
-                    except Exception as e:
-                        ticker_results["events"] = {"error": f"Event analysis failed: {str(e)}"}
+                    # Options Analysis
+                    if include_options:
+                        print(f"⚖️ Running options analysis for {ticker}...")
+                        try:
+                            options_data = self.options_analyzer.analyze_options(ticker, stock_data)
+                            # Ensure JSON serializable
+                            ticker_results["options"] = self._make_json_serializable(options_data)
+                        except Exception as e:
+                            print(f"⚠️  Options analysis failed for {ticker}: {str(e)}")
+                            ticker_results["options"] = {"error": f"Options analysis failed: {str(e)}"}
 
-                # Options Analysis
-                if include_options:
-                    print(f"⚖️ Running options analysis for {ticker}...")
+                        try:
+                            investment_advice = self.investment_advisor.generate_investment_suggestion(stock_data)
+                            # Ensure JSON serializable
+                            ticker_results["investment_advice"] = self._make_json_serializable(investment_advice)
+                        except Exception as e:
+                            print(f"⚠️  Investment advice failed for {ticker}: {str(e)}")
+                            ticker_results["investment_advice"] = {"error": f"Investment advice failed: {str(e)}"}
+
+                    # Seasonal Analysis
+                    if include_seasonal:
+                        print(f"🗓️ Running seasonal analysis for {ticker}...")
+                        try:
+                            seasonal_data = self.seasonal_analyzer.analyze(stock_data)
+                            # Ensure JSON serializable
+                            ticker_results["seasonal"] = self._make_json_serializable(seasonal_data)
+                        except Exception as e:
+                            print(f"⚠️  Seasonal analysis failed for {ticker}: {str(e)}")
+                            ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
+
+                    # Deep (historical chunk) Analysis / Backtesting
+                    if include_deep:
+                        print(f"🔁 Running deep backtesting analysis for {ticker} (chunk={deep_chunk_months}mo)...")
+                        try:
+                            deep_result = self._run_deep_analysis(
+                                ticker,
+                                stock_data.copy(),
+                                chunk_months=deep_chunk_months
+                            )
+                            # Ensure JSON serializable
+                            ticker_results["deep_analysis"] = self._make_json_serializable(deep_result)
+                            # Attach coefficient of precision at top-level
+                            if deep_result and isinstance(deep_result, dict):
+                                summary = deep_result.get("summary", {})
+                                if "coefficient_of_precision" in summary:
+                                    ticker_results["coefficient_of_precision"] = summary["coefficient_of_precision"]
+                        except Exception as e:
+                            print(f"⚠️  Deep analysis failed for {ticker}: {str(e)}")
+                            ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
+
+                    # Generate overall recommendation
                     try:
-                        options_data = self.options_analyzer.analyze_options(ticker, stock_data)
-                        ticker_results["options"] = options_data
+                        recommendation, confidence, risk_level = self._generate_overall_recommendation(ticker_results)
+                        ticker_results["overall_recommendation"] = recommendation
+                        ticker_results["confidence_level"] = confidence
+                        ticker_results["risk_level"] = risk_level
                     except Exception as e:
-                        ticker_results["options"] = {"error": f"Options analysis failed: {str(e)}"}
+                        print(f"⚠️  Recommendation generation failed for {ticker}: {str(e)}")
+                        ticker_results["overall_recommendation"] = "HOLD"
+                        ticker_results["confidence_level"] = "LOW"
+                        ticker_results["risk_level"] = "MEDIUM"
 
-                    try:
-                        investment_advice = self.investment_advisor.generate_investment_suggestion(stock_data)
-                        ticker_results["investment_advice"] = investment_advice
-                    except Exception as e:
-                        ticker_results["investment_advice"] = {"error": f"Investment advice failed: {str(e)}"}
+                    # Save to database if requested
+                    if save_to_db:
+                        try:
+                            # Ensure ticker_results is JSON serializable before saving
+                            serializable_ticker_results = self._make_json_serializable(ticker_results)
+                            analysis_id = self.analysis_model.save(
+                                portfolio_id=portfolio_id,
+                                ticker=ticker,
+                                analysis_type="comprehensive",
+                                analysis_data=serializable_ticker_results,
+                                recommendation=ticker_results.get("overall_recommendation", "HOLD"),
+                                confidence_level=ticker_results.get("confidence_level", "LOW"),
+                                risk_level=ticker_results.get("risk_level", "MEDIUM")
+                            )
+                            ticker_results["analysis_id"] = analysis_id
+                        except Exception as e:
+                            print(f"⚠️  Failed to save analysis to database for {ticker}: {str(e)}")
 
-                # Seasonal Analysis
-                if include_seasonal:
-                    print(f"🗓️ Running seasonal analysis for {ticker}...")
-                    try:
-                        seasonal_data = self.seasonal_analyzer.analyze(stock_data)
-                        ticker_results["seasonal"] = seasonal_data
-                    except Exception as e:
-                        ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
+                    # Ensure final ticker results are JSON serializable
+                    results[ticker] = self._make_json_serializable(ticker_results)
 
-                # Deep (historical chunk) Analysis / Backtesting
-                if include_deep:
-                    print(f"🔁 Running deep backtesting analysis for {ticker} (chunk={deep_chunk_months}mo)...")
-                    try:
-                        deep_result = self._run_deep_analysis(
-                            ticker,
-                            stock_data.copy(),
-                            chunk_months=deep_chunk_months
-                        )
-                        ticker_results["deep_analysis"] = deep_result
-                        # Attach coefficient of precision at top-level
-                        if deep_result and isinstance(deep_result, dict):
-                            summary = deep_result.get("summary", {})
-                            if "coefficient_of_precision" in summary:
-                                ticker_results["coefficient_of_precision"] = summary["coefficient_of_precision"]
-                    except Exception as e:
-                        ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
-
-                # Generate overall recommendation
-                recommendation, confidence, risk_level = self._generate_overall_recommendation(ticker_results)
-                ticker_results["overall_recommendation"] = recommendation
-                ticker_results["confidence_level"] = confidence
-                ticker_results["risk_level"] = risk_level
-
-                # Save to database if requested
-                if save_to_db:
-                    analysis_id = self.analysis_model.save(
-                        portfolio_id=portfolio_id,
-                        ticker=ticker,
-                        analysis_type="comprehensive",
-                        analysis_data=ticker_results,
-                        recommendation=recommendation,
-                        confidence_level=confidence,
-                        risk_level=risk_level
-                    )
-                    ticker_results["analysis_id"] = analysis_id
-
-                results[ticker] = ticker_results
+                except Exception as e:
+                    # If individual ticker analysis fails completely, store the error
+                    print(f"❌ Complete analysis failure for {ticker}: {str(e)}")
+                    results[ticker] = self._make_json_serializable({
+                        "error": f"Complete analysis failure: {str(e)}",
+                        "ticker": ticker,
+                        "timestamp": datetime.now().isoformat()
+                    })
 
             execution_time = time.time() - start_time
 
