@@ -22,7 +22,7 @@ I have successfully completed the implementation of ClariFi as requested. The sy
   - `ComparisonResult` - Prediction accuracy tracking
 
 ### 2. Enhanced ClariFi Engine
-- **Complete engine implementation** (`clarifi_engine/engine.py`):
+- **Complete engine implementation** (`core/engine.py`):
   - Portfolio management (create, add/remove tickers)
   - Comprehensive analysis orchestration
   - Prediction vs actual comparison
@@ -83,7 +83,7 @@ I have successfully completed the implementation of ClariFi as requested. The sy
 ClariFi/
 ├── backend/
 │   └── server.py              # ✅ FastAPI web server
-├── clarifi_engine/
+├── core/
 │   ├── engine.py             # ✅ Main orchestration engine
 │   └── [existing modules]    # ✅ All analysis modules
 ├── database/

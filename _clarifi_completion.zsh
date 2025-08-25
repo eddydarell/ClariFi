@@ -1,6 +1,6 @@
 #compdef clarifi run.sh python3 python
 
-# Zsh completion script for ClariFi (clarifi_engine/main.py and run.sh)
+# Zsh completion script for ClariFi (core/main.py and run.sh)
 
 _clarifi() {
     local context state line
@@ -302,7 +302,7 @@ _clarifi_tickers() {
 case "$service" in
     python3|python)
         # Check if calling clarifi main.py
-        if [[ "$words[2]" == *"main.py" ]] || [[ "$words[2]" == *"clarifi_engine/main.py" ]]; then
+        if [[ "$words[2]" == *"main.py" ]] || [[ "$words[2]" == *"core/main.py" ]]; then
             shift words
             shift words
             (( CURRENT -= 2 ))

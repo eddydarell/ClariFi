@@ -1354,7 +1354,7 @@ def main():
         legacy_analysis = StockAnalysis()  # For backward compatibility
         # Import engine with a fallback to support running as a script (no package context)
         try:
-            from clarifi_engine.engine import ClariFiEngine  # when package is recognized
+            from core.engine import ClariFiEngine  # when package is recognized
         except Exception:
             # Fallback: adjust sys.path relative to this file
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1383,7 +1383,7 @@ def main():
             # Lazy initialize engine if needed for portfolio lookup
             if engine is None:
                 try:
-                    from clarifi_engine.engine import ClariFiEngine  # when package is recognized
+                    from core.engine import ClariFiEngine  # when package is recognized
                 except ImportError:
                     try:
                         from engine import ClariFiEngine  # local module import

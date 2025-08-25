@@ -18,8 +18,8 @@ def main():
     script_dir = Path(__file__).parent
 
     # Check if we're in the right directory
-    if not (script_dir / "clarifi_engine").exists():
-        print("❌ Error: clarifi_engine directory not found")
+    if not (script_dir / "core").exists():
+        print("❌ Error: core directory not found")
         print("Please run this script from the ClariFi root directory")
         sys.exit(1)
 

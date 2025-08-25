@@ -6,8 +6,8 @@
 echo "🚀 Starting ClariFi - Clarify your Finances"
 
 # Check if we're in the right directory
-if [ ! -d "clarifi_engine" ]; then
-    echo "❌ Error: clarifi_engine directory not found"
+if [ ! -d "core" ]; then
+    echo "❌ Error: core directory not found"
     echo "Please run this script from the ClariFi root directory"
     exit 1
 fi

@@ -2,7 +2,7 @@
 
 ## ✅ IMPLEMENTATION COMPLETE
 
-The portfolio info target has been successfully added to `clarifi_engine/main.py` and is now fully accessible via `run.sh`.
+The portfolio info target has been successfully added to `core/main.py` and is now fully accessible via `run.sh`.
 
 ### 🎯 What Was Added
 

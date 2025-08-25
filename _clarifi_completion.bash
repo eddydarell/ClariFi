@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bash completion script for ClariFi (clarifi_engine/main.py and run.sh)
+# Bash completion script for ClariFi (core/main.py and run.sh)
 
 _clarifi_completion() {
     local cur prev words cword
@@ -143,8 +143,8 @@ _clarifi_python_completion() {
     local cur prev words cword
     _init_completion || return
 
-    # Check if we're calling clarifi_engine/main.py
-    if [[ "${words[1]}" == *"main.py" ]] || [[ "${words[1]}" == *"clarifi_engine/main.py" ]]; then
+    # Check if we're calling core/main.py
+    if [[ "${words[1]}" == *"main.py" ]] || [[ "${words[1]}" == *"core/main.py" ]]; then
         # Shift the words array to remove python and main.py
         local shifted_words=("${words[@]:2}")
         local shifted_cword=$((cword - 1))

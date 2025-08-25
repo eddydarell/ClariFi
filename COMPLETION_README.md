@@ -120,7 +120,7 @@ Common ticker symbols are provided for completion:
 
 Tab completion also works when calling the Python script directly:
 ```bash
-python3 clarifi_engine/main.py [TAB]
+python3 core/main.py [TAB]
 # Same completion as ./run.sh
 ```
 

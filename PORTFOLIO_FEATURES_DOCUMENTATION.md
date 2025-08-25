@@ -153,7 +153,7 @@ Added new columns to `portfolio_tickers` table:
 ### Complete Workflow Example
 
 ```python
-from clarifi_engine.engine import ClariFiEngine
+from core.engine import ClariFiEngine
 
 # Initialize engine
 engine = ClariFiEngine()
