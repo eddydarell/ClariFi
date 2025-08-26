@@ -14,6 +14,25 @@ DATABASE_PATH = "clarifi.db"
 
 
 class DatabaseManager:
+
+    def insert_event(self, event_date: str, event: str, category: str, impact: str, event_id: Optional[str] = None):
+        """Insert a new event into the events table."""
+        if event_id is None:
+            event_id = str(uuid.uuid4())
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO events (id, event_date, event, category, impact)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (event_id, event_date, event, category, impact))
+            conn.commit()
+
+    def get_all_events(self) -> List[Dict[str, Any]]:
+        """Fetch all events from the events table."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT event_date, event, category, impact FROM events ORDER BY event_date ASC')
+            return [dict(row) for row in cursor.fetchall()]
     """Manages SQLite database operations for ClariFi"""
 
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -59,6 +78,18 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE,
                     UNIQUE(portfolio_id, ticker)
+                )
+            ''')
+
+            # Event table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    event_date TEXT NOT NULL,
+                    event TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    impact TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 

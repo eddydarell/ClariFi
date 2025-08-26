@@ -4,6 +4,7 @@ Event Correlation Module
 Correlates market movements with news events and external factors.
 """
 
+
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -11,32 +12,32 @@ import requests
 import json
 import re
 from typing import Dict, List, Optional
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from database.models import DatabaseManager
 
 
 class EventCorrelator:
     def __init__(self):
-        self.major_events = self._load_major_events()
+        self.db = DatabaseManager()
+        self.major_events = self._load_major_events_from_db()
         self.news_cache = {}
 
-    def _load_major_events(self):
+
+    def _load_major_events_from_db(self):
         """
-        Load major historical events that typically affect markets.
-        This is a starter dataset - can be expanded.
+        Load major historical events from the database.
+        Returns a dict of event_date -> event info dict.
         """
+        events = self.db.get_all_events()
         return {
-            '2020-03-11': {'event': 'WHO declares COVID-19 pandemic', 'category': 'health', 'impact': 'negative'},
-            '2020-03-15': {'event': 'Federal Reserve cuts rates to near zero', 'category': 'monetary_policy', 'impact': 'positive'},
-            '2020-03-27': {'event': 'CARES Act signed ($2 trillion stimulus)', 'category': 'fiscal_policy', 'impact': 'positive'},
-            '2021-01-06': {'event': 'Capitol riots', 'category': 'political', 'impact': 'negative'},
-            '2021-03-11': {'event': 'American Rescue Plan Act signed', 'category': 'fiscal_policy', 'impact': 'positive'},
-            '2022-02-24': {'event': 'Russia invades Ukraine', 'category': 'geopolitical', 'impact': 'negative'},
-            '2022-03-16': {'event': 'Federal Reserve raises rates 0.25%', 'category': 'monetary_policy', 'impact': 'negative'},
-            '2023-03-10': {'event': 'Silicon Valley Bank collapse', 'category': 'financial', 'impact': 'negative'},
-            '2023-05-03': {'event': 'Federal Reserve raises rates to 5.25%', 'category': 'monetary_policy', 'impact': 'negative'},
-            '2024-01-01': {'event': 'AI boom continues - ChatGPT anniversary', 'category': 'technology', 'impact': 'positive'},
-            '2024-03-20': {'event': 'Federal Reserve maintains rates', 'category': 'monetary_policy', 'impact': 'neutral'},
-            '2024-11-05': {'event': 'US Presidential Election 2024', 'category': 'political', 'impact': 'volatile'},
-            '2025-01-20': {'event': 'Presidential Inauguration 2025', 'category': 'political', 'impact': 'neutral'},
+            e['event_date']: {
+                'event': e['event'],
+                'category': e['category'],
+                'impact': e['impact']
+            }
+            for e in events
         }
 
     def correlate_events_with_movements(self, stock_data_dict, lookback_days=5, lookahead_days=5):
