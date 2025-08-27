@@ -104,11 +104,11 @@ class AdvancedStockAnalysis:
         if not stock_data_dict:
             print("❌ No valid data loaded. Exiting.")
             return
-
         # Step 2: Pattern Analysis
         correlation_results = None
         volatility_results = None
         trend_results = None
+        technical_results = {}
 
         if include_patterns:
             print("\n🔍 PATTERN ANALYSIS...")
@@ -124,6 +124,24 @@ class AdvancedStockAnalysis:
             # Trend analysis
             print("  📉 Analyzing trend strength...")
             trend_results = self.pattern_analyzer.analyze_trend_strength(stock_data_dict)
+
+            # Technical analysis
+            print("  📊 Adding technical indicators...")
+            for ticker, data in stock_data_dict.items():
+                self.pattern_analyzer.add_technical_indicators(data)
+                # Capture last available indicator values for reporting
+                try:
+                    technical_results[ticker] = {
+                        'ADX': float(data['ADX'].iloc[-1]) if 'ADX' in data.columns and not data['ADX'].isna().iloc[-1] else None,
+                        'ATR': float(data['ATR'].iloc[-1]) if 'ATR' in data.columns and not data['ATR'].isna().iloc[-1] else None,
+                        'CCI': float(data['CCI'].iloc[-1]) if 'CCI' in data.columns and not data['CCI'].isna().iloc[-1] else None,
+                        'Williams_%R': float(data['Williams_%R'].iloc[-1]) if 'Williams_%R' in data.columns and not data['Williams_%R'].isna().iloc[-1] else None,
+                        'OBV': float(data['OBV'].iloc[-1]) if 'OBV' in data.columns and not data['OBV'].isna().iloc[-1] else None,
+                        'Parabolic_SAR': float(data['Parabolic_SAR'].iloc[-1]) if 'Parabolic_SAR' in data.columns and not data['Parabolic_SAR'].isna().iloc[-1] else None,
+                        'current_price': float(data['Close'].iloc[-1])
+                    }
+                except Exception:
+                    technical_results[ticker] = {}
 
             print("✅ Pattern analysis completed!")
 
@@ -340,11 +358,12 @@ class AdvancedStockAnalysis:
                 print(f"    ❌ Could not import engine for deep analysis: {e}")
                 print("    💡 Deep analysis requires the ClariFiEngine module")
 
-        # Step 7: Generate Summary Report
+    # Step 7: Generate Summary Report
         print("\n📋 GENERATING ANALYSIS SUMMARY...")
         self._generate_summary_report(tickers, correlation_results, volatility_results,
-                                    trend_results, event_results, unusual_movements,
-                                    options_results, portfolio_advice, seasonal_results, deep_results)
+                trend_results, event_results, unusual_movements,
+                options_results, portfolio_advice, seasonal_results, deep_results,
+                technical_results=technical_results)
 
         print("\n🎉 === COMPREHENSIVE ANALYSIS COMPLETED === 🎉")
         print(f"📁 Data files: {self.downloader.data_dir}/")
@@ -360,7 +379,7 @@ class AdvancedStockAnalysis:
             period (str): Time period for data (default 5y for better seasonal patterns)
             download (bool): Whether to download fresh data
         """
-        print("� ClariFi: Clarify your Finances")
+        print("🚀  ClariFi: Clarify your Finances")
         print("=======================")
         print("�🗓️ === SEASONAL & HOLIDAY ANALYSIS === 🗓️")
         print(f"Tickers: {', '.join(tickers)}")
@@ -474,8 +493,12 @@ class AdvancedStockAnalysis:
 
     def _generate_summary_report(self, tickers, correlation_results, volatility_results,
                                trend_results, event_results, unusual_movements,
-                               options_results=None, portfolio_advice=None, seasonal_results=None, deep_results=None):
-        """Generate a comprehensive text summary of all analyses."""
+                               options_results=None, portfolio_advice=None, seasonal_results=None, deep_results=None,
+                               technical_results=None):
+        """Generate a comprehensive text summary of all analyses.
+
+        Accepts `technical_results` (dict) previously collected during pattern analysis.
+        """
 
         print("\n" + "="*80)
         print("📊 MARKET ANALYSIS SUMMARY REPORT")
@@ -483,7 +506,10 @@ class AdvancedStockAnalysis:
 
         # Enhanced Ticker Summary with Recommendations and Accuracy
         print(f"\n🎯 ANALYZED TICKERS WITH RECOMMENDATIONS:")
-        self._display_enhanced_ticker_summary(tickers, portfolio_advice, deep_results)
+        self._display_enhanced_ticker_summary(tickers, portfolio_advice, deep_results, technical_results)
+
+        # Prepare to capture technical indicator insights for later aggregation
+        tech_insights = []
 
         print(f"\n📅 Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -499,6 +525,46 @@ class AdvancedStockAnalysis:
 
                 if trend_data['sma_crossover'] != 'None':
                     print(f"      🔄 {trend_data['sma_crossover']} detected!")
+
+        # Technical Indicators Summary (use latest values produced earlier)
+        if technical_results:
+            print(f"\n📌 TECHNICAL INDICATORS SUMMARY:")
+            for ticker, ind in technical_results.items():
+                adx = ind.get('ADX')
+                cci = ind.get('CCI')
+                willr = ind.get('Williams_%R')
+                sar = ind.get('Parabolic_SAR')
+                price = ind.get('current_price')
+
+                # Derive a simple composite signal
+                derived = 'Neutral'
+                try:
+                    if adx is not None and adx > 25 and cci is not None and cci > 100 and willr is not None and willr > -20:
+                        derived = 'Strong Bullish'
+                    elif adx is not None and adx > 25 and cci is not None and cci < -100 and willr is not None and willr < -80:
+                        derived = 'Strong Bearish'
+                    elif adx is not None and adx < 20:
+                        derived = 'No clear trend (Low ADX)'
+                    else:
+                        derived = 'Neutral/Wait'
+                except Exception:
+                    derived = 'Unknown'
+
+                sar_note = None
+                try:
+                    if sar is not None and price is not None:
+                        sar_note = 'SAR below price (uptrend)' if sar < price else 'SAR above price (downtrend)'
+                except Exception:
+                    sar_note = None
+
+                line = f"  {ticker}: ADX={adx if adx is not None else 'N/A'} | CCI={cci if cci is not None else 'N/A'} | Williams%R={willr if willr is not None else 'N/A'} | {derived}"
+                if sar_note:
+                    line += f" | {sar_note}"
+                print(line)
+
+                # Add short tech insight for global insights later
+                if derived and derived.startswith('Strong'):
+                    tech_insights.append(f"{ticker}: {derived}")
 
         # Correlation Summary
         if correlation_results and correlation_results.get('pattern_summary'):
@@ -829,7 +895,7 @@ class AdvancedStockAnalysis:
 
         print("="*80)
 
-    def _display_enhanced_ticker_summary(self, tickers, portfolio_advice=None, deep_results=None):
+    def _display_enhanced_ticker_summary(self, tickers, portfolio_advice=None, deep_results=None, technical_results=None):
         """Display enhanced ticker summary with recommendations and accuracy highlighting."""
 
         # Create a comprehensive summary for each ticker
@@ -843,6 +909,27 @@ class AdvancedStockAnalysis:
                 'risk_level': 'UNKNOWN'
             }
 
+            # Attach recent technical indicator snapshot if available
+            tech_snapshot = None
+            tech_signal = None
+            if technical_results and ticker in technical_results:
+                tech_snapshot = technical_results.get(ticker, {})
+                # derive compact tech signal
+                try:
+                    adx = tech_snapshot.get('ADX')
+                    cci = tech_snapshot.get('CCI')
+                    willr = tech_snapshot.get('Williams_%R')
+                    if adx is not None and adx > 25 and cci is not None and cci > 100 and willr is not None and willr > -20:
+                        tech_signal = 'Bull'
+                    elif adx is not None and adx > 25 and cci is not None and cci < -100 and willr is not None and willr < -80:
+                        tech_signal = 'Bear'
+                    elif adx is not None and adx < 20:
+                        tech_signal = 'NoTrend'
+                    else:
+                        tech_signal = 'Neutral'
+                except Exception:
+                    tech_signal = None
+
             # Extract recommendation from portfolio advice
             if portfolio_advice and 'individual_suggestions' in portfolio_advice:
                 suggestion = portfolio_advice['individual_suggestions'].get(ticker, {})
@@ -855,6 +942,11 @@ class AdvancedStockAnalysis:
                 deep_data = deep_results[ticker]
                 summary_data = deep_data.get('summary', {})
                 summary['precision'] = summary_data.get('coefficient_of_precision', None)
+
+            # Save tech snapshot into summary for optional use
+            if tech_snapshot:
+                summary['tech_snapshot'] = tech_snapshot
+                summary['tech_signal'] = tech_signal
 
             ticker_summaries[ticker] = summary
 
@@ -913,7 +1005,17 @@ class AdvancedStockAnalysis:
                 precision_display = "N/A"
 
             # Format fields to fit table
-            ticker_display = f"{emoji} {ticker}"[:11]
+            tech_symbol = ''
+            if summary.get('tech_signal') == 'Bull':
+                tech_symbol = '↑'
+            elif summary.get('tech_signal') == 'Bear':
+                tech_symbol = '↓'
+            elif summary.get('tech_signal') == 'NoTrend':
+                tech_symbol = '↔'
+            elif summary.get('tech_signal') == 'Neutral':
+                tech_symbol = '•'
+
+            ticker_display = f"{emoji} {ticker} {tech_symbol}"[:11]
             rec_display = rec[:11]
             conf_display = confidence[:11]
             risk_display = risk[:11]

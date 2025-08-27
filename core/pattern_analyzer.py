@@ -78,6 +78,89 @@ class PatternAnalyzer:
 
         return results
 
+    def add_technical_indicators(self, data):
+        """
+        Add advanced technical indicators to a DataFrame in-place:
+        - ADX (Average Directional Index)
+        - ATR (Average True Range)
+        - CCI (Commodity Channel Index)
+        - Williams %R
+        - OBV (On-Balance Volume)
+        - Parabolic SAR
+        """
+        # ADX (Average Directional Index)
+        high = data['High']
+        low = data['Low']
+        close = data['Close']
+        plus_dm = high.diff()
+        minus_dm = low.diff().abs()
+        plus_dm[plus_dm < 0] = 0
+        minus_dm[minus_dm < 0] = 0
+        tr1 = high - low
+        tr2 = (high - close.shift()).abs()
+        tr3 = (low - close.shift()).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=14).mean()
+        data['ATR'] = atr
+        plus_di = 100 * (plus_dm.rolling(14).sum() / atr)
+        minus_di = 100 * (minus_dm.rolling(14).sum() / atr)
+        dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+        data['ADX'] = dx.rolling(14).mean()
+
+        # CCI (Commodity Channel Index)
+        tp = (high + low + close) / 3
+        cci = (tp - tp.rolling(20).mean()) / (0.015 * tp.rolling(20).std())
+        data['CCI'] = cci
+
+        # Williams %R
+        highest_high = high.rolling(14).max()
+        lowest_low = low.rolling(14).min()
+        data['Williams_%R'] = -100 * (highest_high - close) / (highest_high - lowest_low)
+
+        # OBV (On-Balance Volume)
+        obv = [0]
+        for i in range(1, len(data)):
+            if data['Close'].iloc[i] > data['Close'].iloc[i-1]:
+                obv.append(obv[-1] + data['Volume'].iloc[i])
+            elif data['Close'].iloc[i] < data['Close'].iloc[i-1]:
+                obv.append(obv[-1] - data['Volume'].iloc[i])
+            else:
+                obv.append(obv[-1])
+        data['OBV'] = obv
+
+        # Parabolic SAR
+        sar = close.copy()
+        af = 0.02
+        max_af = 0.2
+        trend = 1  # 1 for up, -1 for down
+        ep = low.iloc[0]
+        sar.iloc[0] = low.iloc[0]
+        for i in range(1, len(data)):
+            prev_sar = sar.iloc[i-1]
+            if trend == 1:
+                sar.iloc[i] = prev_sar + af * (ep - prev_sar)
+                if low.iloc[i] < sar.iloc[i]:
+                    trend = -1
+                    sar.iloc[i] = ep
+                    ep = high.iloc[i]
+                    af = 0.02
+                else:
+                    if high.iloc[i] > ep:
+                        ep = high.iloc[i]
+                        af = min(af + 0.02, max_af)
+            else:
+                sar.iloc[i] = prev_sar + af * (ep - prev_sar)
+                if high.iloc[i] > sar.iloc[i]:
+                    trend = 1
+                    sar.iloc[i] = ep
+                    ep = low.iloc[i]
+                    af = 0.02
+                else:
+                    if low.iloc[i] < ep:
+                        ep = low.iloc[i]
+                        af = min(af + 0.02, max_af)
+        data['Parabolic_SAR'] = sar
+
     def _find_leading_indicators(self, stock_data_dict, max_lag=5):
         """Find which stocks tend to lead others in price movements."""
         leading_indicators = {}
