@@ -1557,6 +1557,10 @@ def main():
     av_earnings = av_sub.add_parser('earnings', help='📈 Get earnings data')
     av_earnings.add_argument('symbol', help='Stock ticker symbol')
 
+    # av top-gainers-losers
+    av_gainers_losers = av_sub.add_parser('top-gainers-losers', help='📊 Get top gainers, losers, and most actively traded tickers')
+    av_gainers_losers.add_argument('--format', choices=['table', 'json'], default='table', help='Output format (default: table)')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -2887,6 +2891,70 @@ def main():
 
                 except Exception as e:
                     analysis._print_error(f"Failed to fetch earnings: {str(e)}")
+
+            elif args.av_command == 'top-gainers-losers':
+                # Handle top gainers and losers
+                analysis._print_header("ALPHA VANTAGE TOP GAINERS, LOSERS & MOST ACTIVE", "📊")
+
+                try:
+                    gainers_losers_data = av_analyzer.get_top_gainers_losers()
+
+                    analysis._print_section_header("TOP GAINERS", "📈")
+                    if args.format == 'table':
+                        if gainers_losers_data['top_gainers']:
+                            print("🏆 Top 20 Gainers:")
+                            print("-" * 80)
+                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                            print("-" * 80)
+                            for gainer in gainers_losers_data['top_gainers'][:20]:
+                                symbol = gainer.get('ticker', 'N/A')
+                                price = gainer.get('price', 'N/A')
+                                change = gainer.get('change_amount', 'N/A')
+                                change_pct = gainer.get('change_percentage', 'N/A')
+                                volume = gainer.get('volume', 'N/A')
+                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                        else:
+                            print("No gainers data available")
+
+                        analysis._print_section_header("TOP LOSERS", "📉")
+                        if gainers_losers_data['top_losers']:
+                            print("💔 Top 20 Losers:")
+                            print("-" * 80)
+                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                            print("-" * 80)
+                            for loser in gainers_losers_data['top_losers'][:20]:
+                                symbol = loser.get('ticker', 'N/A')
+                                price = loser.get('price', 'N/A')
+                                change = loser.get('change_amount', 'N/A')
+                                change_pct = loser.get('change_percentage', 'N/A')
+                                volume = loser.get('volume', 'N/A')
+                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                        else:
+                            print("No losers data available")
+
+                        analysis._print_section_header("MOST ACTIVELY TRADED", "🔥")
+                        if gainers_losers_data['most_actively_traded']:
+                            print("🚀 Most Active:")
+                            print("-" * 80)
+                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                            print("-" * 80)
+                            for active in gainers_losers_data['most_actively_traded'][:20]:
+                                symbol = active.get('ticker', 'N/A')
+                                price = active.get('price', 'N/A')
+                                change = active.get('change_amount', 'N/A')
+                                change_pct = active.get('change_percentage', 'N/A')
+                                volume = active.get('volume', 'N/A')
+                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                        else:
+                            print("No most active data available")
+                    else:  # JSON format
+                        import json
+                        print(json.dumps(gainers_losers_data, indent=2))
+
+                    analysis._print_success("Top gainers, losers, and most active data retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch top gainers/losers: {str(e)}")
 
             else:
                 av_parser.print_help()

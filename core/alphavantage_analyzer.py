@@ -386,3 +386,22 @@ class AlphaVantageAnalyzer:
                 }
 
         return analysis
+
+    def get_top_gainers_losers(self) -> Dict[str, Any]:
+        """
+        Get top gainers, losers, and most actively traded tickers in the US market.
+
+        Returns:
+            Dict containing top gainers, losers, and most active tickers
+        """
+        data = self._make_request('TOP_GAINERS_LOSERS')
+
+        return {
+            'metadata': {
+                'last_updated': data.get('last_updated', ''),
+                'note': 'Top 20 gainers, losers, and most actively traded tickers in the US market'
+            },
+            'top_gainers': data.get('top_gainers', []),
+            'top_losers': data.get('top_losers', []),
+            'most_actively_traded': data.get('most_actively_traded', [])
+        }
