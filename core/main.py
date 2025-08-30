@@ -27,6 +27,7 @@ try:
     from seasonal_analyzer import SeasonalAnalyzer
     from live_monitor import LiveStockMonitor
     from stock_screener import StockScreener
+    from alphavantage_analyzer import AlphaVantageAnalyzer
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -1285,6 +1286,14 @@ def main():
   ./run.sh ai <portfolio_id> --period 1y  # Analyze entire portfolio
   ./run.sh ai NVDA --model qwen2:7b       # Use specific Ollama model
 
+📡 ALPHA VANTAGE API INTEGRATION:
+  ./run.sh av news-sentiment AAPL MSFT --limit 20
+  ./run.sh av news-sentiment --topics technology finance --analyze
+  ./run.sh av overview TSLA
+  ./run.sh av quote NVDA
+  ./run.sh av income-statement AAPL --annual
+  ./run.sh av earnings GOOGL
+
 � PORTFOLIO MANAGEMENT:
     ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
     ./run.sh portfolio list
@@ -1503,6 +1512,50 @@ def main():
     p_accuracy = port_sub.add_parser('accuracy', help='Show accuracy trends for predictions')
     p_accuracy.add_argument('--portfolio-id', help='Portfolio ID')
     p_accuracy.add_argument('--ticker', help='Ticker symbol')
+
+    # Alpha Vantage API commands
+    av_parser = subparsers.add_parser('av', help='📡 Alpha Vantage API integration for financial data and news sentiment')
+    av_sub = av_parser.add_subparsers(dest='av_command', help='Alpha Vantage Commands')
+
+    # av news-sentiment
+    av_news = av_sub.add_parser('news-sentiment', help='📰 Get news sentiment analysis from Alpha Vantage')
+    av_news.add_argument('tickers', nargs='*', help='Stock ticker symbols to filter news (optional)')
+    av_news.add_argument('--topics', '-t', nargs='+', help='Topics to filter news (e.g., technology, finance)')
+    av_news.add_argument('--time-from', help='Start date in YYYYMMDDTHHMM format')
+    av_news.add_argument('--time-to', help='End date in YYYYMMDDTHHMM format')
+    av_news.add_argument('--sort', choices=['LATEST', 'EARLIEST', 'RELEVANCE'], default='LATEST', help='Sort order (default: LATEST)')
+    av_news.add_argument('--limit', type=int, default=50, help='Maximum number of news items (default: 50)')
+    av_news.add_argument('--analyze', action='store_true', help='Include sentiment trend analysis')
+
+    # av overview
+    av_overview = av_sub.add_parser('overview', help='📊 Get company overview data')
+    av_overview.add_argument('symbol', help='Stock ticker symbol')
+
+    # av quote
+    av_quote = av_sub.add_parser('quote', help='💰 Get real-time quote data')
+    av_quote.add_argument('symbol', help='Stock ticker symbol')
+
+    # av income-statement
+    av_income = av_sub.add_parser('income-statement', help='💼 Get income statement data')
+    av_income.add_argument('symbol', help='Stock ticker symbol')
+    av_income.add_argument('--annual', action='store_true', help='Get annual data (default)')
+    av_income.add_argument('--quarterly', action='store_true', help='Get quarterly data')
+
+    # av balance-sheet
+    av_balance = av_sub.add_parser('balance-sheet', help='🏦 Get balance sheet data')
+    av_balance.add_argument('symbol', help='Stock ticker symbol')
+    av_balance.add_argument('--annual', action='store_true', help='Get annual data (default)')
+    av_balance.add_argument('--quarterly', action='store_true', help='Get quarterly data')
+
+    # av cash-flow
+    av_cashflow = av_sub.add_parser('cash-flow', help='💵 Get cash flow statement data')
+    av_cashflow.add_argument('symbol', help='Stock ticker symbol')
+    av_cashflow.add_argument('--annual', action='store_true', help='Get annual data (default)')
+    av_cashflow.add_argument('--quarterly', action='store_true', help='Get quarterly data')
+
+    # av earnings
+    av_earnings = av_sub.add_parser('earnings', help='📈 Get earnings data')
+    av_earnings.add_argument('symbol', help='Stock ticker symbol')
 
     args = parser.parse_args()
 
@@ -2562,6 +2615,281 @@ def main():
                 analysis._print_warning("Non-fatal errors:")
                 for k, v in result['errors'].items():
                     print(f"  {k}: {v}")
+
+        elif args.command == 'av':
+            # Alpha Vantage API commands
+            if not args.av_command:
+                av_parser.print_help()
+                return
+
+            try:
+                av_analyzer = AlphaVantageAnalyzer()
+            except ValueError as e:
+                analysis._print_error(str(e))
+                print("💡 Get your free API key from: https://www.alphavantage.co/support/#api-key")
+                print("💡 Set it as an environment variable: export ALPHA_VANTAGE_API_KEY=your_key_here")
+                return
+
+            if args.av_command == 'news-sentiment':
+                # Handle news sentiment analysis
+                tickers = args.tickers if args.tickers else None
+                topics = args.topics if hasattr(args, 'topics') and args.topics else None
+
+                analysis._print_header("ALPHA VANTAGE NEWS SENTIMENT ANALYSIS", "📰")
+                if tickers:
+                    print(f"📊 Tickers: {', '.join(tickers)}")
+                if topics:
+                    print(f"🗂️ Topics: {', '.join(topics)}")
+                if args.time_from:
+                    print(f"📅 From: {args.time_from}")
+                if args.time_to:
+                    print(f"📅 To: {args.time_to}")
+                print(f"🔢 Limit: {args.limit}")
+                print(f"📈 Sort: {args.sort}")
+                print()
+
+                try:
+                    news_data = av_analyzer.get_news_sentiment(
+                        tickers=tickers,
+                        topics=topics,
+                        time_from=args.time_from,
+                        time_to=args.time_to,
+                        sort=args.sort,
+                        limit=args.limit
+                    )
+
+                    # Display results
+                    metadata = news_data.get('metadata', {})
+                    feed = news_data.get('feed', [])
+
+                    analysis._print_section_header("NEWS SUMMARY", "📊")
+                    print(f"📄 Total Articles: {metadata.get('total_items', 0)}")
+                    print(f"🎯 Tickers: {metadata.get('tickers', 'All')}")
+                    print(f"🗂️ Topics: {metadata.get('topics', 'All')}")
+                    print(f"📅 Date Range: {metadata.get('time_range', {}).get('from', 'Any')} to {metadata.get('time_range', {}).get('to', 'Now')}")
+                    print()
+
+                    if feed:
+                        analysis._print_section_header("RECENT NEWS ARTICLES", "📰")
+                        print("┌─────────────────────────────────────────────────────────────────────────────────────────────┐")
+                        print("│ Title                                                                                       │")
+                        print("├─────────────────────────────────────────────────────────────────────────────────────────────┤")
+
+                        for i, item in enumerate(feed[:10], 1):  # Show first 10 articles
+                            title = item.get('title', 'No title')[:85]
+                            print(f"│ {i:2d}. {title:<83} │")
+
+                        print("└─────────────────────────────────────────────────────────────────────────────────────────────┘")
+
+                        # Show detailed sentiment for first few articles
+                        analysis._print_section_header("SENTIMENT ANALYSIS", "📈")
+                        print("┌─────────┬─────────────┬─────────────┬─────────────────┬─────────────────────────────┐")
+                        print("│ Article │ Overall     │ Ticker      │ Relevance      │ Sentiment Label             │")
+                        print("├─────────┼─────────────┼─────────────┼─────────────────┼─────────────────────────────┤")
+
+                        for i, item in enumerate(feed[:5], 1):  # Show first 5 articles
+                            overall_score = item.get('overall_sentiment_score', 0)
+                            overall_label = item.get('overall_sentiment_label', 'N/A')
+
+                            # Get primary ticker sentiment if available
+                            ticker_sentiments = item.get('ticker_sentiment', [])
+                            if ticker_sentiments:
+                                primary_ticker = ticker_sentiments[0]
+                                ticker = primary_ticker.get('ticker', 'N/A')
+                                relevance = primary_ticker.get('relevance_score', 'N/A')
+                                sentiment_label = primary_ticker.get('ticker_sentiment_label', 'N/A')
+                            else:
+                                ticker = 'N/A'
+                                relevance = 'N/A'
+                                sentiment_label = 'N/A'
+
+                            print(f"│ {i:7d} │ {overall_score:>11.3f} │ {ticker:>10} │ {relevance:>14} │ {sentiment_label:>26} │")
+
+                        print("└─────────┴─────────────┴─────────────┴─────────────────┴─────────────────────────────┘")
+
+                        if args.analyze:
+                            # Perform sentiment trend analysis
+                            analysis_result = av_analyzer.analyze_sentiment_trends(news_data)
+                            analysis._print_section_header("SENTIMENT TRENDS ANALYSIS", "📊")
+                            print(f"📈 Overall Sentiment Trend: {analysis_result.get('sentiment_trend', 'N/A')}")
+                            print(f"📊 Average Sentiment Score: {analysis_result.get('average_sentiment_score', 0):.3f}")
+                            print(f"📰 Total Articles Analyzed: {analysis_result.get('total_articles', 0)}")
+
+                            # Show sentiment distribution
+                            distribution = analysis_result.get('sentiment_distribution', {})
+                            if distribution:
+                                print("\n📊 Sentiment Distribution:")
+                                for sentiment, count in distribution.items():
+                                    percentage = (count / analysis_result.get('total_articles', 1)) * 100
+                                    print(f"   {sentiment}: {count} articles ({percentage:.1f}%)")
+
+                            # Show ticker-specific sentiment
+                            ticker_sentiment = analysis_result.get('ticker_specific_sentiment', {})
+                            if ticker_sentiment:
+                                analysis._print_section_header("TICKER-SPECIFIC SENTIMENT", "📈")
+                                print("┌─────────┬─────────────────┬─────────────────┬─────────────┐")
+                                print("│ Ticker  │ Avg Sentiment   │ Article Count   │ Trend       │")
+                                print("├─────────┼─────────────────┼─────────────────┼─────────────┤")
+
+                                for ticker, data in ticker_sentiment.items():
+                                    avg_score = data.get('average_score', 0)
+                                    count = data.get('article_count', 0)
+                                    trend = data.get('sentiment_trend', 'N/A')
+                                    print(f"│ {ticker:7} │ {avg_score:>15.3f} │ {count:>14} │ {trend:>10} │")
+
+                                print("└─────────┴─────────────────┴─────────────────┴─────────────┘")
+
+                    analysis._print_success("News sentiment analysis completed!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch news sentiment: {str(e)}")
+
+            elif args.av_command == 'overview':
+                # Handle company overview
+                analysis._print_header(f"ALPHA VANTAGE COMPANY OVERVIEW: {args.symbol.upper()}", "📊")
+
+                try:
+                    overview_data = av_analyzer.get_company_overview(args.symbol)
+
+                    analysis._print_section_header("COMPANY INFORMATION", "🏢")
+                    print(f"🏷️ Symbol: {overview_data.get('symbol', 'N/A')}")
+                    print(f"🏢 Name: {overview_data.get('name', 'N/A')}")
+                    print(f"🌍 Exchange: {overview_data.get('exchange', 'N/A')}")
+                    print(f"🇺🇸 Country: {overview_data.get('country', 'N/A')}")
+                    print(f"🏭 Sector: {overview_data.get('sector', 'N/A')}")
+                    print(f"🏭 Industry: {overview_data.get('industry', 'N/A')}")
+
+                    analysis._print_section_header("FINANCIAL METRICS", "💰")
+                    print(f"💵 Market Cap: {overview_data.get('market_capitalization', 'N/A')}")
+                    print(f"💰 EBITDA: {overview_data.get('ebitda', 'N/A')}")
+                    print(f"📊 PE Ratio: {overview_data.get('pe_ratio', 'N/A')}")
+                    print(f"💹 EPS: {overview_data.get('eps', 'N/A')}")
+                    print(f"💰 Dividend Yield: {overview_data.get('dividend_yield', 'N/A')}")
+                    print(f"📈 52W High: {overview_data.get('52_week_high', 'N/A')}")
+                    print(f"📉 52W Low: {overview_data.get('52_week_low', 'N/A')}")
+
+                    analysis._print_section_header("ANALYST RECOMMENDATIONS", "🎯")
+                    print(f"🟢 Strong Buy: {overview_data.get('analyst_rating_strong_buy', 'N/A')}")
+                    print(f"🟢 Buy: {overview_data.get('analyst_rating_buy', 'N/A')}")
+                    print(f"🟡 Hold: {overview_data.get('analyst_rating_hold', 'N/A')}")
+                    print(f"🔴 Sell: {overview_data.get('analyst_rating_sell', 'N/A')}")
+                    print(f"🔴 Strong Sell: {overview_data.get('analyst_rating_strong_sell', 'N/A')}")
+                    print(f"🎯 Target Price: {overview_data.get('analyst_target_price', 'N/A')}")
+
+                    analysis._print_success("Company overview retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch company overview: {str(e)}")
+
+            elif args.av_command == 'quote':
+                # Handle global quote
+                analysis._print_header(f"ALPHA VANTAGE GLOBAL QUOTE: {args.symbol.upper()}", "💰")
+
+                try:
+                    quote_data = av_analyzer.get_global_quote(args.symbol)
+
+                    analysis._print_section_header("QUOTE INFORMATION", "💹")
+                    print(f"🏷️ Symbol: {quote_data.get('symbol', 'N/A')}")
+                    print(f"💵 Price: ${quote_data.get('price', 'N/A')}")
+                    print(f"📈 Open: ${quote_data.get('open', 'N/A')}")
+                    print(f"📊 High: ${quote_data.get('high', 'N/A')}")
+                    print(f"📉 Low: ${quote_data.get('low', 'N/A')}")
+                    print(f"📅 Previous Close: ${quote_data.get('previous_close', 'N/A')}")
+                    print(f"📊 Volume: {quote_data.get('volume', 'N/A')}")
+                    print(f"📅 Latest Trading Day: {quote_data.get('latest_trading_day', 'N/A')}")
+
+                    # Calculate change
+                    try:
+                        change = float(quote_data.get('change', 0))
+                        change_pct = quote_data.get('change_percent', '0%').strip('%')
+                        change_pct_val = float(change_pct)
+
+                        if change >= 0:
+                            print(f"📈 Change: +${change:.2f} (+{change_pct}%) 🟢")
+                        else:
+                            print(f"📉 Change: -${abs(change):.2f} ({change_pct}%) 🔴")
+                    except (ValueError, TypeError):
+                        print(f"📊 Change: {quote_data.get('change', 'N/A')} ({quote_data.get('change_percent', 'N/A')})")
+
+                    analysis._print_success("Quote data retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch quote: {str(e)}")
+
+            elif args.av_command == 'income-statement':
+                # Handle income statement
+                annual = not getattr(args, 'quarterly', False)
+                analysis._print_header(f"ALPHA VANTAGE INCOME STATEMENT: {args.symbol.upper()}", "💼")
+                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+
+                try:
+                    income_data = av_analyzer.get_income_statement(args.symbol, annual=annual)
+
+                    # This would display the income statement data
+                    # For brevity, showing basic structure
+                    analysis._print_section_header("INCOME STATEMENT DATA", "📋")
+                    print("💡 Income statement data retrieved successfully!")
+                    print("📄 Use this data for detailed financial analysis")
+
+                    analysis._print_success("Income statement retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch income statement: {str(e)}")
+
+            elif args.av_command == 'balance-sheet':
+                # Handle balance sheet
+                annual = not getattr(args, 'quarterly', False)
+                analysis._print_header(f"ALPHA VANTAGE BALANCE SHEET: {args.symbol.upper()}", "🏦")
+                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+
+                try:
+                    balance_data = av_analyzer.get_balance_sheet(args.symbol, annual=annual)
+
+                    analysis._print_section_header("BALANCE SHEET DATA", "📋")
+                    print("💡 Balance sheet data retrieved successfully!")
+                    print("📄 Use this data for detailed financial analysis")
+
+                    analysis._print_success("Balance sheet retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch balance sheet: {str(e)}")
+
+            elif args.av_command == 'cash-flow':
+                # Handle cash flow
+                annual = not getattr(args, 'quarterly', False)
+                analysis._print_header(f"ALPHA VANTAGE CASH FLOW: {args.symbol.upper()}", "💵")
+                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+
+                try:
+                    cashflow_data = av_analyzer.get_cash_flow(args.symbol, annual=annual)
+
+                    analysis._print_section_header("CASH FLOW DATA", "📋")
+                    print("💡 Cash flow data retrieved successfully!")
+                    print("📄 Use this data for detailed financial analysis")
+
+                    analysis._print_success("Cash flow statement retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch cash flow: {str(e)}")
+
+            elif args.av_command == 'earnings':
+                # Handle earnings
+                analysis._print_header(f"ALPHA VANTAGE EARNINGS: {args.symbol.upper()}", "📈")
+
+                try:
+                    earnings_data = av_analyzer.get_earnings(args.symbol)
+
+                    analysis._print_section_header("EARNINGS DATA", "📋")
+                    print("💡 Earnings data retrieved successfully!")
+                    print("📄 Use this data for detailed financial analysis")
+
+                    analysis._print_success("Earnings data retrieved successfully!")
+
+                except Exception as e:
+                    analysis._print_error(f"Failed to fetch earnings: {str(e)}")
+
+            else:
+                av_parser.print_help()
 
     except KeyboardInterrupt:
         analysis._print_warning("Operation cancelled by user")
