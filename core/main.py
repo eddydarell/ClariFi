@@ -45,6 +45,38 @@ class AdvancedStockAnalysis:
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
 
+    def _print_header(self, title, emoji="🚀"):
+        """Print a consistent header for all analysis types."""
+        print(f"{emoji} ClariFi: Clarify your Finances")
+        print("=" * 50)
+        print(f"{emoji} === {title.upper()} === {emoji}")
+        print("=" * 50)
+
+    def _print_section_header(self, title, emoji="📊"):
+        """Print a consistent section header."""
+        print(f"\n{emoji} {title.upper()}:")
+        print("-" * 40)
+
+    def _print_subsection(self, title, emoji="  "):
+        """Print a consistent subsection."""
+        print(f"{emoji} {title}:")
+
+    def _print_success(self, message):
+        """Print a success message."""
+        print(f"✅ {message}")
+
+    def _print_error(self, message):
+        """Print an error message."""
+        print(f"❌ {message}")
+
+    def _print_warning(self, message):
+        """Print a warning message."""
+        print(f"⚠️  {message}")
+
+    def _print_info(self, message):
+        """Print an info message."""
+        print(f"ℹ️  {message}")
+
     def comprehensive_analysis(self, tickers, period="1y", download=True,
                              include_patterns=True, include_events=True,
                              include_advanced_viz=True, include_options=True,
@@ -66,30 +98,36 @@ class AdvancedStockAnalysis:
             include_deep (bool): Whether to include deep backtesting analysis
             deep_chunk_months (int): Chunk size in months for deep analysis
         """
-        print(f"🚀 ClariFi: Clarify your Finances")
-        print("=======================")
-        print(f"🚀 === COMPREHENSIVE MARKET ANALYSIS === 🚀")
-        print(f"Tickers: {', '.join(tickers)}")
-        print(f"Period: {period}")
-        print(f"Analysis Features: Patterns={include_patterns}, Events={include_events}, Advanced Viz={include_advanced_viz}, Options={include_options}, Investment Advice={include_investment_advice}, Seasonal={include_seasonal}, Deep={include_deep}")
+        self._print_header("COMPREHENSIVE MARKET ANALYSIS")
+        print(f"📈 Tickers: {', '.join(tickers)}")
+        print(f"⏰ Period: {period}")
+        features = []
+        if include_patterns: features.append("Patterns")
+        if include_events: features.append("Events")
+        if include_advanced_viz: features.append("Advanced Viz")
+        if include_options: features.append("Options")
+        if include_investment_advice: features.append("Investment Advice")
+        if include_seasonal: features.append("Seasonal")
+        if include_deep: features.append("Deep Analysis")
+        print(f"🔧 Analysis Features: {', '.join(features)}")
         if include_deep:
-            print(f"Deep Analysis: Chunk size = {deep_chunk_months} months")
-        print("=" * 60)
+            print(f"🔬 Deep Analysis: Chunk size = {deep_chunk_months} months")
+        print()
 
         # Step 1: Download data
         stock_data_dict = {}
         if download:
-            print("\n📊 DOWNLOADING STOCK DATA...")
+            self._print_section_header("DOWNLOADING STOCK DATA")
             results = self.downloader.download_multiple_stocks(tickers, None, None, period)
 
             if not results:
-                print("❌ No data downloaded. Exiting.")
+                self._print_error("No data downloaded. Exiting.")
                 return
 
-            print("✅ Data download completed!")
+            self._print_success("Data download completed!")
 
         # Load data into memory
-        print("\n📋 LOADING DATA...")
+        self._print_section_header("LOADING DATA")
         for ticker in tickers:
             files = self.visualizer.find_stock_files(ticker)
             if files:
@@ -102,7 +140,7 @@ class AdvancedStockAnalysis:
                     print(f"  ❌ {ticker}: Failed to load data")
 
         if not stock_data_dict:
-            print("❌ No valid data loaded. Exiting.")
+            self._print_error("No valid data loaded. Exiting.")
             return
         # Step 2: Pattern Analysis
         correlation_results = None
@@ -111,22 +149,18 @@ class AdvancedStockAnalysis:
         technical_results = {}
 
         if include_patterns:
-            print("\n🔍 PATTERN ANALYSIS...")
+            self._print_section_header("PATTERN ANALYSIS")
 
-            # Correlation patterns
-            print("  📈 Analyzing correlation patterns...")
+            self._print_subsection("Analyzing correlation patterns")
             correlation_results = self.pattern_analyzer.analyze_correlation_patterns(stock_data_dict)
 
-            # Volatility patterns
-            print("  📊 Analyzing volatility patterns...")
+            self._print_subsection("Analyzing volatility patterns")
             volatility_results = self.pattern_analyzer.detect_volatility_patterns(stock_data_dict)
 
-            # Trend analysis
-            print("  📉 Analyzing trend strength...")
+            self._print_subsection("Analyzing trend strength")
             trend_results = self.pattern_analyzer.analyze_trend_strength(stock_data_dict)
 
-            # Technical analysis
-            print("  📊 Adding technical indicators...")
+            self._print_subsection("Adding technical indicators")
             for ticker, data in stock_data_dict.items():
                 self.pattern_analyzer.add_technical_indicators(data)
                 # Capture last available indicator values for reporting
@@ -143,59 +177,59 @@ class AdvancedStockAnalysis:
                 except Exception:
                     technical_results[ticker] = {}
 
-            print("✅ Pattern analysis completed!")
+            self._print_success("Pattern analysis completed!")
 
         # Step 3: Event Correlation
         event_results = None
         unusual_movements = None
 
         if include_events:
-            print("\n🌍 EVENT CORRELATION ANALYSIS...")
+            self._print_section_header("EVENT CORRELATION ANALYSIS")
 
-            print("  📰 Correlating with major events...")
+            self._print_subsection("Correlating with major events")
             event_results = self.event_correlator.correlate_events_with_movements(stock_data_dict)
 
-            print("  🚨 Identifying unusual movements...")
+            self._print_subsection("Identifying unusual movements")
             unusual_movements = self.event_correlator.identify_unusual_movements(stock_data_dict)
 
-            print("✅ Event correlation completed!")
+            self._print_success("Event correlation completed!")
 
         # Step 4: Advanced Visualizations
         if include_advanced_viz:
-            print("\n🎨 CREATING ADVANCED VISUALIZATIONS...")
+            self._print_section_header("CREATING ADVANCED VISUALIZATIONS")
 
             if correlation_results:
-                print("  📊 Creating correlation heatmaps...")
+                self._print_subsection("Creating correlation heatmaps")
                 self.advanced_visualizer.plot_correlation_heatmap(correlation_results)
-                print("  📈 Creating rolling correlation plots...")
+                self._print_subsection("Creating rolling correlation plots")
                 self.advanced_visualizer.plot_rolling_correlations(correlation_results)
 
             if volatility_results:
-                print("  🌊 Creating volatility clustering plots...")
+                self._print_subsection("Creating volatility clustering plots")
                 self.advanced_visualizer.plot_volatility_clustering(volatility_results)
 
             if event_results:
-                print("  📰 Creating event impact visualizations...")
+                self._print_subsection("Creating event impact visualizations")
                 self.advanced_visualizer.plot_event_impact_analysis(event_results)
 
             # Support/Resistance for first available ticker
             if stock_data_dict:
                 first_ticker = list(stock_data_dict.keys())[0]
-                print(f"  🎯 Creating support/resistance for {first_ticker}...")
+                self._print_subsection(f"Creating support/resistance for {first_ticker}")
                 sr_data = self.pattern_analyzer.identify_support_resistance(
                     stock_data_dict[first_ticker], first_ticker)
                 self.advanced_visualizer.plot_support_resistance(
                     sr_data, stock_data_dict[first_ticker])
 
-            print("✅ Advanced visualizations completed!")
+            self._print_success("Advanced visualizations completed!")
 
         # Step 5: Enhanced Options Analysis and Risk Assessment
         options_results = {}
         if include_options:
-            print("\n⚖️ ENHANCED OPTIONS & RISK ANALYSIS...")
+            self._print_section_header("ENHANCED OPTIONS & RISK ANALYSIS")
             for ticker in tickers:
                 if ticker in stock_data_dict:
-                    print(f"  🔍 Analyzing comprehensive risk for {ticker}...")
+                    self._print_subsection(f"Analyzing comprehensive risk for {ticker}")
                     risk_analysis = self.options_analyzer.comprehensive_risk_analysis(stock_data_dict[ticker])
 
                     # Also get the traditional options analysis for pricing data
@@ -216,33 +250,33 @@ class AdvancedStockAnalysis:
                     var_95_pct = advanced_var.get('var_95_pct', 0)
                     sharpe_ratio = risk_ratios.get('sharpe_ratio', 0)
 
-                    print(f"      💰 Current Price: ${current_price:.2f}")
-                    print(f"      📊 Current Volatility: {current_vol:.1%}")
-                    print(f"      ⚠️ Risk Level: {risk_level}")
-                    print(f"      📊 VaR (95%): {var_95_pct:.1f}% daily")
+                    print(f"    💰 Current Price: ${current_price:.2f}")
+                    print(f"    📊 Current Volatility: {current_vol:.1%}")
+                    print(f"    ⚠️  Risk Level: {risk_level}")
+                    print(f"    📊 VaR (95%): {var_95_pct:.1f}% daily")
 
                     if sharpe_ratio != 0:
                         sharpe_emoji = "🌟" if sharpe_ratio > 1.0 else "📊" if sharpe_ratio > 0.5 else "❌"
-                        print(f"      {sharpe_emoji} Sharpe Ratio: {sharpe_ratio:.2f}")
+                        print(f"    {sharpe_emoji} Sharpe Ratio: {sharpe_ratio:.2f}")
 
                     vol_percentile = risk_analysis.get('volatility_percentile', 'N/A')
                     if vol_percentile != 'N/A':
-                        print(f"      📈 Volatility Percentile: {vol_percentile:.1f}%")
+                        print(f"    📈 Volatility Percentile: {vol_percentile:.1f}%")
 
                     # Show expected moves for key timeframes
                     for timeframe in ['30d', '90d']:
                         if timeframe in risk_analysis['risk_metrics']:
                             metrics = risk_analysis['risk_metrics'][timeframe]
                             expected_move = metrics['expected_move']
-                            print(f"      🎯 Expected {timeframe} move: ±{expected_move:.1%}")
+                            print(f"    🎯 Expected {timeframe} move: ±{expected_move:.1%}")
 
-            print("✅ Options analysis completed!")
+            self._print_success("Options analysis completed!")
 
         # Step 6: Investment Suggestions
         investment_suggestions = {}
         portfolio_advice = None
         if include_investment_advice:
-            print("\n💡 GENERATING INVESTMENT SUGGESTIONS...")
+            self._print_section_header("GENERATING INVESTMENT SUGGESTIONS")
 
             # Prepare comprehensive data for investment advisor
             portfolio_data = {}
@@ -255,7 +289,7 @@ class AdvancedStockAnalysis:
                     }
 
             # Generate portfolio-level suggestions
-            print("  🎯 Analyzing portfolio recommendations...")
+            self._print_subsection("Analyzing portfolio recommendations")
             portfolio_advice = self.investment_advisor.get_portfolio_suggestions(
                 portfolio_data, correlation_results
             )
@@ -269,56 +303,56 @@ class AdvancedStockAnalysis:
 
                 print(f"  {action_emoji} {ticker}: {suggestion['suggestion']} "
                       f"({suggestion['confidence']} confidence) {confidence_emoji}")
-                print(f"      Risk: {suggestion['risk_level']}")
-                print(f"      Reasoning: {suggestion['reasoning']}")
+                print(f"    Risk: {suggestion['risk_level']}")
+                print(f"    Reasoning: {suggestion['reasoning']}")
 
                 # Display enhanced features: holding period and recovery forecast
                 if 'holding_period_analysis' in suggestion:
                     holding = suggestion['holding_period_analysis']
-                    print(f"      ⏱️  Suggested Holding Period: {holding['suggested_holding_days']} days ({holding['confidence']} confidence)")
+                    print(f"    ⏱️  Suggested Holding Period: {holding['suggested_holding_days']} days ({holding['confidence']} confidence)")
 
                 if 'recovery_forecast' in suggestion:
                     recovery = suggestion['recovery_forecast']
                     if recovery.get('is_currently_in_dip', False) and recovery.get('forecast_recovery_date'):
-                        print(f"      🔮 Recovery Forecast: {recovery['forecast_recovery_date']} ({recovery.get('confidence', 'UNKNOWN')} confidence)")
-                        print(f"      📉 Currently in dip: {recovery.get('current_dip_magnitude', 0):.1%} from recent high")
+                        print(f"    🔮 Recovery Forecast: {recovery['forecast_recovery_date']} ({recovery.get('confidence', 'UNKNOWN')} confidence)")
+                        print(f"    📉 Currently in dip: {recovery.get('current_dip_magnitude', 0):.1%} from recent high")
                     elif not recovery.get('is_currently_in_dip', True) and recovery.get('recovery_statistics'):
                         stats = recovery['recovery_statistics']
-                        print(f"      📈 Historical Recovery Pattern: {stats.get('average_days', 0):.1f} days average")
+                        print(f"    📈 Historical Recovery Pattern: {stats.get('average_days', 0):.1f} days average")
                 print()
 
-            print("✅ Investment suggestions completed!")
+            self._print_success("Investment suggestions completed!")
 
         # Step 6.5: Seasonal Analysis
         seasonal_results = {}
         if include_seasonal:
-            print("\n🗓️ SEASONAL ANALYSIS...")
+            self._print_section_header("SEASONAL ANALYSIS")
             for ticker in tickers:
                 if ticker in stock_data_dict:
-                    print(f"  📅 Analyzing seasonal patterns for {ticker}...")
+                    self._print_subsection(f"Analyzing seasonal patterns for {ticker}")
                     seasonal_result = self.seasonal_analyzer.analyze(stock_data_dict[ticker])
                     if seasonal_result:
                         seasonal_results[ticker] = seasonal_result
 
                         # Display key seasonal insights
-                        print(f"      🌟 Recommendation: {seasonal_result['recommendation']}")
-                        print(f"      📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
-                        print(f"      📈 Best Months: {', '.join(seasonal_result['best_months'])}")
-                        print(f"      📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
-                        print(f"      💡 Pattern: {seasonal_result['seasonal_summary']}")
+                        print(f"    🌟 Recommendation: {seasonal_result['recommendation']}")
+                        print(f"    📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
+                        print(f"    📈 Best Months: {', '.join(seasonal_result['best_months'])}")
+                        print(f"    📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
+                        print(f"    💡 Pattern: {seasonal_result['seasonal_summary']}")
                     else:
-                        print(f"      ⚠️ Insufficient data for seasonal analysis")
+                        self._print_warning(f"Insufficient data for seasonal analysis")
 
             if seasonal_results:
-                print("✅ Seasonal analysis completed!")
+                self._print_success("Seasonal analysis completed!")
             else:
-                print("⚠️ No seasonal patterns detected (insufficient data)")
+                self._print_warning("No seasonal patterns detected (insufficient data)")
 
         # Step 6.6: Deep Analysis (Historical Backtesting)
         deep_results = {}
         if include_deep:
-            print("\n🔁 DEEP BACKTESTING ANALYSIS...")
-            print(f"   Chunk size: {deep_chunk_months} months")
+            self._print_section_header("DEEP BACKTESTING ANALYSIS")
+            print(f"   🔬 Chunk size: {deep_chunk_months} months")
 
             # Import the engine for deep analysis functionality
             try:
@@ -327,7 +361,7 @@ class AdvancedStockAnalysis:
 
                 for ticker in tickers:
                     if ticker in stock_data_dict:
-                        print(f"  🔍 Running deep analysis for {ticker}...")
+                        self._print_subsection(f"Running deep analysis for {ticker}")
                         try:
                             deep_result = engine._run_deep_analysis(
                                 ticker,
@@ -347,25 +381,26 @@ class AdvancedStockAnalysis:
                         except Exception as e:
                             print(f"    ❌ Deep analysis error for {ticker}: {str(e)}")
                     else:
-                        print(f"    ⚠️ No data available for {ticker}")
+                        print(f"    ⚠️  No data available for {ticker}")
 
                 if deep_results:
-                    print("✅ Deep analysis completed!")
+                    self._print_success("Deep analysis completed!")
                 else:
-                    print("⚠️ No deep analysis results generated")
+                    self._print_warning("No deep analysis results generated")
 
             except ImportError as e:
                 print(f"    ❌ Could not import engine for deep analysis: {e}")
-                print("    💡 Deep analysis requires the ClariFiEngine module")
+                self._print_warning("Deep analysis requires the ClariFiEngine module")
 
     # Step 7: Generate Summary Report
-        print("\n📋 GENERATING ANALYSIS SUMMARY...")
+        self._print_section_header("GENERATING ANALYSIS SUMMARY")
         self._generate_summary_report(tickers, correlation_results, volatility_results,
                 trend_results, event_results, unusual_movements,
                 options_results, portfolio_advice, seasonal_results, deep_results,
                 technical_results=technical_results)
 
-        print("\n🎉 === COMPREHENSIVE ANALYSIS COMPLETED === 🎉")
+        print("\n" + "=" * 60)
+        self._print_success("COMPREHENSIVE ANALYSIS COMPLETED!")
         print(f"📁 Data files: {self.downloader.data_dir}/")
         print(f"📊 Visualizations: {self.visualizer.output_dir}/")
         print(f"📈 Advanced charts: {self.advanced_visualizer.output_dir}/")
@@ -379,25 +414,23 @@ class AdvancedStockAnalysis:
             period (str): Time period for data (default 5y for better seasonal patterns)
             download (bool): Whether to download fresh data
         """
-        print("🚀  ClariFi: Clarify your Finances")
-        print("=======================")
-        print("�🗓️ === SEASONAL & HOLIDAY ANALYSIS === 🗓️")
-        print(f"Tickers: {', '.join(tickers)}")
-        print(f"Period: {period}")
-        print("=" * 50)
+        self._print_header("SEASONAL & HOLIDAY ANALYSIS", "🗓️")
+        print(f"📈 Tickers: {', '.join(tickers)}")
+        print(f"⏰ Period: {period}")
+        print()
 
         # Step 1: Download data if requested
         if download:
-            print("\n📊 DOWNLOADING STOCK DATA...")
+            self._print_section_header("DOWNLOADING STOCK DATA")
             results = self.downloader.download_multiple_stocks(tickers, None, None, period)
             if not results:
-                print("❌ No data downloaded. Continuing with existing data...")
+                self._print_warning("No data downloaded. Continuing with existing data...")
             else:
-                print("✅ Data download completed!")
+                self._print_success("Data download completed!")
 
         # Step 2: Load data
         stock_data_dict = {}
-        print("\n📋 LOADING DATA...")
+        self._print_section_header("LOADING DATA")
         for ticker in tickers:
             files = self.visualizer.find_stock_files(ticker)
             if files:
@@ -412,16 +445,16 @@ class AdvancedStockAnalysis:
                 print(f"  ❌ {ticker}: No data files found")
 
         if not stock_data_dict:
-            print("❌ No valid data loaded. Exiting.")
+            self._print_error("No valid data loaded. Exiting.")
             return
 
         # Step 3: Seasonal Analysis
-        print("\n🧮 ANALYZING SEASONAL PATTERNS...")
+        self._print_section_header("ANALYZING SEASONAL PATTERNS")
         seasonal_results = {}
 
         for ticker in tickers:
             if ticker in stock_data_dict:
-                print(f"\n  📅 Analyzing {ticker}...")
+                self._print_subsection(f"Analyzing {ticker}")
                 seasonal_result = self.seasonal_analyzer.analyze(stock_data_dict[ticker])
                 if seasonal_result:
                     seasonal_results[ticker] = seasonal_result
@@ -433,14 +466,14 @@ class AdvancedStockAnalysis:
                     print(f"    💡 Pattern: {seasonal_result.seasonal_summary}")
                     print(f"    🎯 Recommendation: {seasonal_result.recommendation}")
                 else:
-                    print(f"    ⚠️ Insufficient data for seasonal analysis (need >1 year)")
+                    self._print_warning("Insufficient data for seasonal analysis (need >1 year)")
 
         if not seasonal_results:
-            print("\n❌ No seasonal patterns detected. Need more historical data.")
+            self._print_error("No seasonal patterns detected. Need more historical data.")
             return
 
         # Step 4: Generate Detailed Seasonal Report
-        print("\n📊 === DETAILED SEASONAL REPORT ===")
+        self._print_section_header("DETAILED SEASONAL REPORT")
 
         current_month = calendar.month_name[datetime.now().month]
         print(f"📅 Current Month: {current_month}")
@@ -484,11 +517,11 @@ class AdvancedStockAnalysis:
             if current_month in seasonal_data.best_months:
                 print(f"   🌟 CURRENT TIMING: FAVORABLE - {current_month} is a strong month")
             elif current_month in seasonal_data.worst_months:
-                print(f"   ⚠️ CURRENT TIMING: UNFAVORABLE - {current_month} is typically weak")
+                print(f"   ⚠️  CURRENT TIMING: UNFAVORABLE - {current_month} is typically weak")
             else:
                 print(f"   ➡️ CURRENT TIMING: NEUTRAL - {current_month} shows average performance")
 
-        print("\n✅ Seasonal analysis complete!")
+        self._print_success("Seasonal analysis complete!")
         print(f"📁 Data files: {self.downloader.data_dir}/")
 
     def _generate_summary_report(self, tickers, correlation_results, volatility_results,
@@ -505,7 +538,7 @@ class AdvancedStockAnalysis:
         print("="*80)
 
         # Enhanced Ticker Summary with Recommendations and Accuracy
-        print(f"\n🎯 ANALYZED TICKERS WITH RECOMMENDATIONS:")
+        self._print_section_header("ANALYZED TICKERS WITH RECOMMENDATIONS")
         self._display_enhanced_ticker_summary(tickers, portfolio_advice, deep_results, technical_results)
 
         # Prepare to capture technical indicator insights for later aggregation
@@ -515,7 +548,7 @@ class AdvancedStockAnalysis:
 
         # Trend Analysis Summary
         if trend_results:
-            print(f"\n📈 TREND ANALYSIS SUMMARY:")
+            self._print_section_header("TREND ANALYSIS SUMMARY")
             for ticker, trend_data in trend_results.items():
                 momentum = "🚀" if trend_data['recent_momentum_pct'] > 5 else \
                           "📉" if trend_data['recent_momentum_pct'] < -5 else "➡️"
@@ -528,7 +561,7 @@ class AdvancedStockAnalysis:
 
         # Technical Indicators Summary (use latest values produced earlier)
         if technical_results:
-            print(f"\n📌 TECHNICAL INDICATORS SUMMARY:")
+            self._print_section_header("TECHNICAL INDICATORS SUMMARY")
             for ticker, ind in technical_results.items():
                 adx = ind.get('ADX')
                 cci = ind.get('CCI')
@@ -570,28 +603,28 @@ class AdvancedStockAnalysis:
         if correlation_results and correlation_results.get('pattern_summary'):
             pattern_summary = correlation_results['pattern_summary']
 
-            print(f"\n🔗 CORRELATION PATTERNS:")
+            self._print_section_header("CORRELATION PATTERNS")
 
             if pattern_summary['highly_correlated_pairs']:
-                print("  📈 Highly Correlated Pairs (>0.7):")
+                self._print_subsection("Highly Correlated Pairs (>0.7)")
                 for pair_data in pattern_summary['highly_correlated_pairs'][:5]:
                     print(f"      {pair_data['pair']}: {pair_data['correlation']:.3f} "
                           f"(stability: {pair_data['stability']:.3f})")
 
             if pattern_summary['negatively_correlated_pairs']:
-                print("  📉 Negatively Correlated Pairs (<-0.5):")
+                self._print_subsection("Negatively Correlated Pairs (<-0.5)")
                 for pair_data in pattern_summary['negatively_correlated_pairs'][:3]:
                     print(f"      {pair_data['pair']}: {pair_data['correlation']:.3f}")
 
             if pattern_summary['strong_leading_indicators']:
-                print("  🎯 Strong Leading Indicators:")
+                self._print_subsection("Strong Leading Indicators")
                 for indicator in pattern_summary['strong_leading_indicators'][:3]:
                     print(f"      {indicator['pair']}: {indicator['lag_days']} day lag, "
                           f"correlation: {indicator['correlation']:.3f}")
 
         # Volatility Summary
         if volatility_results:
-            print(f"\n🌊 VOLATILITY ANALYSIS:")
+            self._print_section_header("VOLATILITY ANALYSIS")
             for ticker, vol_data in volatility_results.items():
                 clustering_score = vol_data['volatility_clustering_score']
                 clustering_desc = "High" if clustering_score > 0.3 else \
@@ -603,23 +636,23 @@ class AdvancedStockAnalysis:
         if event_results and unusual_movements:
             event_summary = self.event_correlator.generate_event_summary(event_results, unusual_movements)
 
-            print(f"\n📰 EVENT IMPACT ANALYSIS:")
+            self._print_section_header("EVENT IMPACT ANALYSIS")
 
             if event_summary['most_impactful_events']:
-                print("  🚨 Most Impactful Events:")
+                self._print_subsection("Most Impactful Events")
                 for event in event_summary['most_impactful_events'][:3]:
                     print(f"      {event['event_date']}: {event['event'][:50]}... "
                           f"(avg impact: {event['avg_impact']:.1f}%)")
 
             if event_summary['unexplained_movements']:
-                print("  ❓ Unexplained Large Movements:")
+                self._print_subsection("Unexplained Large Movements")
                 for movement in event_summary['unexplained_movements'][:3]:
                     print(f"      {movement['ticker']} on {movement['date']}: "
                           f"{movement['return_pct']:.1f}% ({movement['magnitude']})")
 
         # Enhanced Options & Risk Analysis Summary
         if options_results:
-            print(f"\n⚖️ COMPREHENSIVE RISK ANALYSIS:")
+            self._print_section_header("COMPREHENSIVE RISK ANALYSIS")
             for ticker, risk_data in options_results.items():
                 risk_level = risk_data['risk_assessment']
 
@@ -667,16 +700,16 @@ class AdvancedStockAnalysis:
 
         # Investment Suggestions Summary
         if portfolio_advice:
-            print(f"\n💰 INVESTMENT RECOMMENDATIONS:")
+            self._print_section_header("INVESTMENT RECOMMENDATIONS")
             summary = portfolio_advice['portfolio_summary']
 
-            print(f"  📊 Portfolio Overview:")
-            print(f"      🟢 BUY recommendations: {summary['buy_recommendations']}")
-            print(f"      🔴 SELL recommendations: {summary['sell_recommendations']}")
-            print(f"      🟡 HOLD recommendations: {summary['hold_recommendations']}")
-            print(f"      ⚠️ High-risk positions: {summary['high_risk_positions']}")
-            print(f"      📈 Portfolio risk level: {portfolio_advice['portfolio_risk']}")
-            print(f"      🎯 Diversification: {portfolio_advice['diversification_note']}")
+            self._print_subsection("Portfolio Overview")
+            print(f"  🟢 BUY recommendations: {summary['buy_recommendations']}")
+            print(f"  🔴 SELL recommendations: {summary['sell_recommendations']}")
+            print(f"  🟡 HOLD recommendations: {summary['hold_recommendations']}")
+            print(f"  ⚠️ High-risk positions: {summary['high_risk_positions']}")
+            print(f"  📈 Portfolio risk level: {portfolio_advice['portfolio_risk']}")
+            print(f"  🎯 Diversification: {portfolio_advice['diversification_note']}")
 
             # Highlight top recommendations
             buy_suggestions = [ticker for ticker, suggestion in portfolio_advice['individual_suggestions'].items()
@@ -693,7 +726,7 @@ class AdvancedStockAnalysis:
 
         # Seasonal Analysis Summary
         if seasonal_results:
-            print(f"\n🗓️ SEASONAL PATTERNS:")
+            self._print_section_header("SEASONAL PATTERNS")
             for ticker, seasonal_data in seasonal_results.items():
                 seasonal_emoji = "🌟" if "FAVORABLE" in seasonal_data['recommendation'] else \
                                "⚠️" if "UNFAVORABLE" in seasonal_data['recommendation'] else "🔄"
@@ -703,22 +736,22 @@ class AdvancedStockAnalysis:
 
                 print(f"  {seasonal_emoji} {ticker}: {bias_desc} seasonal bias "
                       f"(Score: {seasonal_data['bias_score']:.2f})")
-                print(f"      📈 Strong months: {', '.join(seasonal_data['best_months'])}")
-                print(f"      📉 Weak months: {', '.join(seasonal_data['worst_months'])}")
-                print(f"      💡 Pattern: {seasonal_data['seasonal_summary']}")
+                print(f"    📈 Strong months: {', '.join(seasonal_data['best_months'])}")
+                print(f"    📉 Weak months: {', '.join(seasonal_data['worst_months'])}")
+                print(f"    💡 Pattern: {seasonal_data['seasonal_summary']}")
 
                 # Current month context
                 current_month = calendar.month_name[datetime.now().month]
                 if current_month in seasonal_data['best_months']:
-                    print(f"      🎯 Current timing: FAVORABLE ({current_month})")
+                    print(f"    🎯 Current timing: FAVORABLE ({current_month})")
                 elif current_month in seasonal_data['worst_months']:
-                    print(f"      ⏰ Current timing: UNFAVORABLE ({current_month})")
+                    print(f"    ⏰ Current timing: UNFAVORABLE ({current_month})")
                 else:
-                    print(f"      ➡️ Current timing: NEUTRAL ({current_month})")
+                    print(f"    ➡️ Current timing: NEUTRAL ({current_month})")
 
         # Deep Analysis Summary
         if deep_results:
-            print(f"\n🔁 BACKTESTING ACCURACY:")
+            self._print_section_header("BACKTESTING ACCURACY")
 
             # Create table header
             print("┌─────────────┬─────────────┬─────────────┬─────────────┬───────────────┐")
@@ -756,14 +789,14 @@ class AdvancedStockAnalysis:
                 print(f"\n  📊 Portfolio Average Precision: {confidence_emoji} {avg_precision:.1%} ({confidence_desc} confidence)")
 
                 if avg_precision > 0.7:
-                    print(f"      ✅ High confidence in analysis accuracy - Recommendations are reliable")
+                    print(f"    ✅ High confidence in analysis accuracy - Recommendations are reliable")
                 elif avg_precision > 0.5:
-                    print(f"      ⚠️ Moderate confidence - Consider additional factors before investing")
+                    print(f"    ⚠️ Moderate confidence - Consider additional factors before investing")
                 else:
-                    print(f"      🚨 Low confidence - Use caution with recommendations, seek more data")
+                    print(f"    🚨 Low confidence - Use caution with recommendations, seek more data")
 
         print("\n" + "="*80)
-        print("💡 INVESTMENT INSIGHTS:")
+        self._print_section_header("INVESTMENT INSIGHTS")
 
         # Generate actionable insights
         insights = []
@@ -1102,30 +1135,27 @@ class AdvancedStockAnalysis:
 class StockAnalysis(AdvancedStockAnalysis):
     def quick_analysis(self, tickers, period="1y", download=True, visualize=True):
         """Legacy quick analysis method."""
-        print(f"=== Quick Stock Analysis ===")
-        print("🚀 ClariFi: Clarify your Finances")
-        print("=======================")
-        print(f"Tickers: {', '.join(tickers)}")
-        print(f"Period: {period}")
+        self._print_header("QUICK STOCK ANALYSIS")
+        print(f"📈 Tickers: {', '.join(tickers)}")
+        print(f"⏰ Period: {period}")
         print()
 
         # Download data if requested
         if download:
-            print("📊 Downloading stock data...")
+            self._print_section_header("DOWNLOADING STOCK DATA")
             results = self.downloader.download_multiple_stocks(
                 tickers, None, None, period
             )
 
             if not results:
-                print("❌ No data downloaded. Exiting.")
+                self._print_error("No data downloaded. Exiting.")
                 return
 
-            print("✅ Data download completed!")
-            print()
+            self._print_success("Data download completed!")
 
         # Create visualizations if requested
         if visualize:
-            print("📈 Creating visualizations...")
+            self._print_section_header("CREATING VISUALIZATIONS")
 
             # Individual charts for each stock
             for ticker in tickers:
@@ -1140,16 +1170,15 @@ class StockAnalysis(AdvancedStockAnalysis):
                 print(f"  Creating correlation matrix...")
                 self.visualizer.create_correlation_matrix(tickers, save=True, show=False)
 
-            print("✅ Visualizations completed!")
-            print()
+            self._print_success("Visualizations completed!")
 
-        print("🎉 Analysis completed!")
-        print(f"📁 Data files saved in: {self.downloader.data_dir}/")
-        print(f"📊 Charts saved in: {self.visualizer.output_dir}/")
+        self._print_success("Analysis completed!")
+        print(f"📁 Data files: {self.downloader.data_dir}/")
+        print(f"📊 Charts: {self.visualizer.output_dir}/")
 
     def show_stock_info(self, tickers):
         """Display information about stocks."""
-        print("=== Stock Information ===")
+        self._print_header("STOCK INFORMATION")
         for ticker in tickers:
             info = self.downloader.get_stock_info(ticker)
             if info:
@@ -1159,20 +1188,20 @@ class StockAnalysis(AdvancedStockAnalysis):
                 print(f"  Market Cap: {info['marketCap']}")
                 print(f"  Currency: {info['currency']}")
             else:
-                print(f"\n{ticker.upper()} - Unable to fetch information")
+                self._print_error(f"Unable to fetch information for {ticker.upper()}")
 
     def list_available_data(self):
         """List all available data files."""
+        self._print_header("AVAILABLE DATA FILES")
         files = self.visualizer.find_stock_files()
         if files:
-            print("=== Available Data Files ===")
             for file in sorted(files):
                 ticker = self.visualizer.extract_ticker_from_filename(file)
                 file_size = os.path.getsize(file) / 1024  # KB
                 mod_time = datetime.fromtimestamp(os.path.getmtime(file))
                 print(f"  {ticker.upper()}: {os.path.basename(file)} ({file_size:.1f} KB, {mod_time.strftime('%Y-%m-%d %H:%M')})")
         else:
-            print("No data files found.")
+            self._print_warning("No data files found.")
 
 
 def main():
@@ -1690,7 +1719,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    print(f"❌ No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -1698,7 +1727,8 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                print(f"🔍 PATTERN ANALYSIS: {', '.join(stock_data_dict.keys())}")
+                analysis._print_header("PATTERN ANALYSIS", "🔍")
+                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 correlation_results = analysis.pattern_analyzer.analyze_correlation_patterns(
                     stock_data_dict, window=args.window)
                 trend_results = analysis.pattern_analyzer.analyze_trend_strength(stock_data_dict)
@@ -1707,11 +1737,11 @@ def main():
                 analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
                 analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
 
-                print("✅ Pattern analysis completed!")
+                analysis._print_success("Pattern analysis completed!")
 
         elif args.command == 'correlations':
             if len(args.tickers) < 2:
-                print("❌ Need at least 2 tickers for correlation analysis")
+                analysis._print_error("Need at least 2 tickers for correlation analysis")
                 return
 
             # Load data
@@ -1719,7 +1749,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    print(f"❌ No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -1727,7 +1757,8 @@ def main():
                     stock_data_dict[ticker] = data
 
             if len(stock_data_dict) >= 2:
-                print(f"📊 CORRELATION ANALYSIS: {', '.join(stock_data_dict.keys())}")
+                analysis._print_header("CORRELATION ANALYSIS", "📊")
+                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 correlation_results = analysis.pattern_analyzer.analyze_correlation_patterns(
                     stock_data_dict, window=args.window)
 
@@ -1735,7 +1766,7 @@ def main():
                 analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
                 analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
 
-                print("✅ Correlation analysis completed!")
+                analysis._print_success("Correlation analysis completed!")
 
         elif args.command == 'events':
             # Load data
@@ -1743,7 +1774,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    print(f"❌ No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -1751,7 +1782,8 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                print(f"📰 EVENT CORRELATION: {', '.join(stock_data_dict.keys())}")
+                analysis._print_header("EVENT CORRELATION ANALYSIS", "📰")
+                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 event_results = analysis.event_correlator.correlate_events_with_movements(
                     stock_data_dict, args.lookback, args.lookahead)
                 unusual_movements = analysis.event_correlator.identify_unusual_movements(stock_data_dict)
@@ -1762,7 +1794,7 @@ def main():
                 # Generate summary
                 event_summary = analysis.event_correlator.generate_event_summary(event_results, unusual_movements)
 
-                print("✅ Event correlation analysis completed!")
+                analysis._print_success("Event correlation analysis completed!")
 
         elif args.command == 'volatility':
             # Load data
@@ -1778,14 +1810,14 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                print(f"🌊 VOLATILITY ANALYSIS: {', '.join(stock_data_dict.keys())}")
+                analysis._print_header("VOLATILITY ANALYSIS", "🌊")
                 volatility_results = analysis.pattern_analyzer.detect_volatility_patterns(
                     stock_data_dict, window=args.window)
 
                 if args.clustering:
                     analysis.advanced_visualizer.plot_volatility_clustering(volatility_results)
 
-                print("✅ Volatility analysis completed!")
+                analysis._print_success("Volatility analysis completed!")
 
         elif args.command == 'download':
             downloader = StockDownloader()
@@ -1796,7 +1828,7 @@ def main():
                 end = args.end or datetime.now().strftime("%Y-%m-%d")
                 results = downloader.download_multiple_stocks(args.tickers, start, end)
 
-            print("📥 Download completed:")
+            analysis._print_header("DOWNLOAD COMPLETED", "📥")
             for ticker, filepath in results.items():
                 if filepath:
                     print(f"  ✅ {ticker}: {filepath}")
@@ -1836,7 +1868,7 @@ def main():
             monitor.update_interval = args.interval
             monitor.add_tickers(args.tickers)
 
-            print(f"🚀 Starting live monitoring for: {', '.join(args.tickers)}")
+            analysis._print_header("STARTING LIVE MONITORING", "🚀")
             print(f"📊 Update interval: {args.interval} seconds")
             print(f"📈 Features: Graphs={'enabled' if not args.no_graphs else 'disabled'}, Summary={'enabled' if not args.no_summary else 'disabled'}")
             print()
@@ -1851,7 +1883,7 @@ def main():
             # Initialize stock screener
             screener = StockScreener()
 
-            print(f"🔍 Starting market screening for: {args.category}")
+            analysis._print_header(f"MARKET SCREENING: {args.category.upper()}", "🔍")
             print(f"📊 Limit: {args.limit} results")
             if args.export:
                 print(f"📁 Export to: {args.export}")
@@ -1881,10 +1913,10 @@ def main():
             def format_portfolio_table(portfolios):
                 """Format portfolios as a clean table"""
                 if not portfolios:
-                    print("📁 No portfolios found")
+                    analysis._print_warning("No portfolios found")
                     return
 
-                print("📁 Portfolios:")
+                analysis._print_header("PORTFOLIOS", "📁")
                 print("┌──────────────────────────────────────┬─────────────────┬───────────────────────────────┐")
                 print("│ Portfolio ID                         │ Name            │ Description                   │")
                 print("├──────────────────────────────────────┼─────────────────┼───────────────────────────────┤")
@@ -1898,10 +1930,10 @@ def main():
             def format_tickers_table(tickers, portfolio_id):
                 """Format tickers as a clean table"""
                 if not tickers:
-                    print(f"📊 No tickers in portfolio {portfolio_id[:8]}...")
+                    analysis._print_warning(f"No tickers in portfolio {portfolio_id[:8]}...")
                     return
 
-                print(f"📊 Tickers in portfolio {portfolio_id[:8]}...:")
+                analysis._print_header(f"TICKERS IN PORTFOLIO {portfolio_id[:8]}...", "📊")
                 print("┌─────────┬──────────┬─────────────┬─────────────────┐")
                 print("│ Ticker  │ Quantity │ Avg Cost    │ Added Date      │")
                 print("├─────────┼──────────┼─────────────┼─────────────────┤")
@@ -1928,11 +1960,11 @@ def main():
                 result = engine.create_portfolio(args.name, args.description)
                 if result.get('success'):
                     portfolio_id = result['portfolio_id']
-                    print(f"✅ Created portfolio '{args.name}'")
+                    analysis._print_success(f"Created portfolio '{args.name}'")
                     print(f"   ID: {portfolio_id}")
                     print(f"   Description: {args.description or '(none)'}")
                 else:
-                    print(f"❌ Failed to create portfolio: {result.get('error')}")
+                    analysis._print_error(f"Failed to create portfolio: {result.get('error')}")
 
             elif cmd == 'list':
                 portfolios = engine.get_portfolios()
@@ -1953,7 +1985,7 @@ def main():
                         portfolio_id = portfolio['id']
 
                 if not portfolio:
-                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    analysis._print_error(f"Portfolio not found: {args.portfolio_id}")
                     return
 
                 # Get portfolio info
@@ -1963,7 +1995,7 @@ def main():
                     portfolio_info = data['portfolio']
 
                     # Display portfolio metadata
-                    print(f"📁 Portfolio Information: {portfolio_info['name']}")
+                    analysis._print_header(f"PORTFOLIO INFORMATION: {portfolio_info['name']}", "📁")
                     print(f"   ID: {portfolio_info['id']}")
                     print(f"   Description: {portfolio_info.get('description', 'No description')}")
                     print(f"   Created: {portfolio_info.get('created_at', 'Unknown')}")
@@ -1971,7 +2003,7 @@ def main():
 
                     # Display financial summary
                     summary = data.get('summary', {})
-                    print(f"\n💰 Financial Summary:")
+                    analysis._print_section_header("FINANCIAL SUMMARY", "💰")
                     print(f"   Total Tickers: {summary.get('total_tickers', 0)}")
                     print(f"   Total Current Value: ${summary.get('total_current_value', 0):,.2f}")
                     print(f"   Total Cost Basis: ${summary.get('total_cost', 0):,.2f}")
@@ -1981,7 +2013,7 @@ def main():
                     # Display accuracy metrics if available
                     accuracy = data.get('accuracy_metrics', {})
                     if accuracy.get('total_predictions', 0) > 0:
-                        print(f"\n📊 Prediction Accuracy:")
+                        analysis._print_section_header("PREDICTION ACCURACY", "📊")
                         print(f"   Average Accuracy: {accuracy.get('avg_accuracy', 0):.1%}")
                         print(f"   Total Predictions: {accuracy.get('total_predictions', 0)}")
                         print(f"   Accuracy Range: {accuracy.get('min_accuracy', 0):.1%} - {accuracy.get('max_accuracy', 0):.1%}")
@@ -1989,7 +2021,7 @@ def main():
                     # Display tickers table
                     tickers = data.get('tickers', [])
                     if tickers:
-                        print(f"\n📊 Holdings:")
+                        analysis._print_section_header("HOLDINGS", "📊")
                         print("┌─────────┬──────────┬─────────────┬─────────────┬─────────────┬─────────────────┐")
                         print("│ Ticker  │ Quantity │ Avg Cost    │ Current $   │ Current Val │ P&L (%)         │")
                         print("├─────────┼──────────┼─────────────┼─────────────┼─────────────┼─────────────────┤")
@@ -2016,7 +2048,7 @@ def main():
                     # Display recent changes if any
                     recent_changes = data.get('recent_changes', [])
                     if recent_changes:
-                        print(f"\n📈 Recent Changes (Last 30 days):")
+                        analysis._print_section_header("RECENT CHANGES (LAST 30 DAYS)", "📈")
                         print("┌─────────┬─────────────┬─────────────────────┬───────────────────────────┐")
                         print("│ Ticker  │ Action      │ Date                │ Notes                     │")
                         print("├─────────┼─────────────┼─────────────────────┼───────────────────────────┤")
@@ -2035,7 +2067,7 @@ def main():
                         analytics_result = engine.get_portfolio_analytics(portfolio_id)
                         if analytics_result.get('success'):
                             analytics = analytics_result['data']
-                            print(f"\n📈 Portfolio Analytics:")
+                            analysis._print_section_header("PORTFOLIO ANALYTICS", "📈")
 
                             # Portfolio summary
                             summary = analytics.get('portfolio_summary', {})
@@ -2064,19 +2096,19 @@ def main():
                             if analysis_metrics.get('has_analysis_data'):
                                 recommendations = analysis_metrics.get('recommendation_distribution', [])
                                 if recommendations:
-                                    print(f"\n   🎯 Analysis Recommendations:")
+                                    analysis._print_section_header("ANALYSIS RECOMMENDATIONS", "🎯")
                                     for rec in recommendations:
                                         if rec.get('recommendation'):
                                             print(f"      {rec['recommendation']}: {rec['count']} position(s)")
                             else:
                                 print(f"\n   💡 Run portfolio analysis to get AI-powered recommendations")
                         else:
-                            print(f"\n📈 Analytics unavailable: {analytics_result.get('error', 'Unknown error')}")
+                            analysis._print_warning(f"Analytics unavailable: {analytics_result.get('error', 'Unknown error')}")
                     else:
                         print(f"\n💡 Use --analytics flag for detailed portfolio analytics")
 
                 else:
-                    print(f"❌ Failed to get portfolio info: {result.get('message')}")
+                    analysis._print_error(f"Failed to get portfolio info: {result.get('message')}")
                     if result.get('error'):
                         print(f"   Error: {result['error']}")
 
@@ -2086,20 +2118,20 @@ def main():
                     quantity=args.quantity, avg_cost=args.avg_cost
                 )
                 if result.get('success'):
-                    print(f"✅ Added {args.ticker.upper()} to portfolio")
+                    analysis._print_success(f"Added {args.ticker.upper()} to portfolio")
                     if args.quantity > 0:
                         print(f"   Quantity: {args.quantity}")
                     if args.avg_cost > 0:
                         print(f"   Average cost: ${args.avg_cost:.2f}")
                 else:
-                    print(f"❌ Failed to add ticker: {result.get('error')}")
+                    analysis._print_error(f"Failed to add ticker: {result.get('error')}")
 
             elif cmd == 'remove':
                 result = engine.remove_ticker_from_portfolio(args.portfolio_id, args.ticker)
                 if result.get('success'):
-                    print(f"✅ Removed {args.ticker.upper()} from portfolio")
+                    analysis._print_success(f"Removed {args.ticker.upper()} from portfolio")
                 else:
-                    print(f"❌ {result.get('message', 'Failed to remove ticker')}")
+                    analysis._print_error(f"{result.get('message', 'Failed to remove ticker')}")
 
             elif cmd == 'tickers':
                 tickers = engine.get_portfolio_tickers(args.portfolio_id)
@@ -2108,48 +2140,48 @@ def main():
             elif cmd == 'update-ticker':
                 # Validate that at least one field is provided
                 if args.quantity is None and args.avg_cost is None:
-                    print("❌ Error: At least one of --quantity or --avg-cost must be provided")
+                    analysis._print_error("At least one of --quantity or --avg-cost must be provided")
                     return
 
                 result = engine.update_ticker_in_portfolio(
                     args.portfolio_id, args.ticker, args.quantity, args.avg_cost
                 )
                 if result.get('success'):
-                    print(f"✅ Ticker {result.get('ticker')} updated successfully")
+                    analysis._print_success(f"Ticker {result.get('ticker')} updated successfully")
                     if args.quantity is not None:
                         print(f"   New quantity: {args.quantity}")
                     if args.avg_cost is not None:
                         print(f"   New average cost: ${args.avg_cost:.2f}")
                 else:
-                    print(f"❌ Failed to update ticker: {result.get('message')}")
+                    analysis._print_error(f"Failed to update ticker: {result.get('message')}")
 
             elif cmd == 'update':
                 # Validate that at least one field is provided
                 if not args.name and not args.description:
-                    print("❌ Error: At least one of --name or --description must be provided")
+                    analysis._print_error("At least one of --name or --description must be provided")
                     return
 
                 result = engine.update_portfolio(args.portfolio_id, args.name, args.description)
                 if result.get('success'):
-                    print(f"✅ Portfolio updated successfully")
+                    analysis._print_success("Portfolio updated successfully")
                     if args.name:
                         print(f"   New name: {args.name}")
                     if args.description:
                         print(f"   New description: {args.description}")
                 else:
-                    print(f"❌ Failed to update portfolio: {result.get('message')}")
+                    analysis._print_error(f"Failed to update portfolio: {result.get('message')}")
 
             elif cmd == 'delete':
                 # Show warning and get portfolio info first
                 portfolio = engine.portfolio_model.get_by_id(args.portfolio_id)
                 if not portfolio:
-                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    analysis._print_error(f"Portfolio not found: {args.portfolio_id}")
                     return
 
                 tickers = engine.get_portfolio_tickers(args.portfolio_id)
                 ticker_count = len(tickers)
 
-                print(f"⚠️  WARNING: You are about to delete portfolio '{portfolio['name']}'")
+                analysis._print_warning(f"You are about to delete portfolio '{portfolio['name']}'")
                 print(f"   This action is IRREVERSIBLE and will:")
                 print(f"   - Delete the portfolio permanently")
                 print(f"   - Remove all {ticker_count} associated tickers")
@@ -2158,10 +2190,10 @@ def main():
 
                 result = engine.delete_portfolio(args.portfolio_id, args.confirm_name)
                 if result.get('success'):
-                    print(f"✅ {result.get('message')}")
+                    analysis._print_success(f"{result.get('message')}")
                     print(f"   Deleted tickers: {result.get('deleted_tickers', 0)}")
                 else:
-                    print(f"❌ {result.get('message')}")
+                    analysis._print_error(f"{result.get('message')}")
                     if 'warning' in result:
                         print(f"   {result['warning']}")
 
@@ -2169,14 +2201,14 @@ def main():
                 # Show portfolio info first
                 portfolio = engine.portfolio_model.get_by_id(args.portfolio_id)
                 if not portfolio:
-                    print(f"❌ Portfolio not found: {args.portfolio_id}")
+                    analysis._print_error(f"Portfolio not found: {args.portfolio_id}")
                     return
 
-                print(f"🔄 Syncing prices for portfolio '{portfolio['name']}'...")
+                analysis._print_header(f"SYNCING PRICES FOR PORTFOLIO '{portfolio['name']}'", "🔄")
 
                 result = engine.sync_portfolio_prices(args.portfolio_id)
                 if result.get('success'):
-                    print(f"✅ {result.get('message')}")
+                    analysis._print_success(f"{result.get('message')}")
                     print(f"   Portfolio: {result.get('portfolio_name')}")
                     print(f"   Total tickers: {result.get('total_tickers', 0)}")
                     print(f"   Successful syncs: {result.get('successful_syncs', 0)}")
@@ -2186,7 +2218,7 @@ def main():
                     # Show detailed results in a table
                     sync_results = result.get('sync_results', {})
                     if sync_results:
-                        print("\n📊 Price Update Details:")
+                        analysis._print_section_header("PRICE UPDATE DETAILS", "📊")
                         print("┌─────────┬─────────────┬─────────────┬─────────────┬──────────────┐")
                         print("│ Ticker  │ Status      │ New Price   │ Change $    │ Change %     │")
                         print("├─────────┼─────────────┼─────────────┼─────────────┼──────────────┤")
@@ -2207,17 +2239,17 @@ def main():
 
                         print("└─────────┴─────────────┴─────────────┴─────────────┴──────────────┘")
                 else:
-                    print(f"❌ Failed to sync portfolio: {result.get('message')}")
+                    analysis._print_error(f"Failed to sync portfolio: {result.get('message')}")
                     print(f"   Error: {result.get('error', 'Unknown error')}")
 
             elif cmd == 'analyze':
                 # Fetch tickers first
                 tickers = engine.get_portfolio_tickers(args.portfolio_id)
                 if not tickers:
-                    print(f"❌ No tickers in portfolio {args.portfolio_id[:8]}...")
+                    analysis._print_error(f"No tickers in portfolio {args.portfolio_id[:8]}...")
                     return
                 ticker_list = [t['ticker'] for t in tickers]
-                print(f"🚀 Analyzing portfolio {args.portfolio_id[:8]}...")
+                analysis._print_header(f"ANALYZING PORTFOLIO {args.portfolio_id[:8]}...", "🚀")
                 print(f"📊 Tickers: {', '.join(ticker_list)}")
                 print(f"📅 Period: {args.period}")
 
@@ -2234,9 +2266,9 @@ def main():
                 )
                 if result.get('success'):
                     if args.summary_only:
-                        print("\n📋 Portfolio Analysis Summary:")
+                        analysis._print_header("PORTFOLIO ANALYSIS SUMMARY", "📋")
                     else:
-                        print("\n📋 Portfolio Analysis Complete:")
+                        analysis._print_header("PORTFOLIO ANALYSIS COMPLETE", "📋")
 
                     # Check if deep analysis was included
                     has_deep_results = any('deep_analysis' in data for data in result['results'].values())
@@ -2316,11 +2348,11 @@ def main():
                     analyzed_count = result.get('analyzed_tickers', 0)
                     print(f"\n⏱️  Execution time: {exec_time:.2f}s")
                     print(f"📊 Analyzed {analyzed_count} ticker(s)")
-                    print("✅ Portfolio analysis complete")
+                    analysis._print_success("Portfolio analysis complete")
 
                     print_json_minimal(result, show_json=not args.summary_only)
                 else:
-                    print(f"❌ Analysis failed: {result.get('error')}")
+                    analysis._print_error(f"Analysis failed: {result.get('error')}")
                     print_json_minimal(result, show_json=True)
 
             elif cmd == 'history':
@@ -2328,7 +2360,7 @@ def main():
                     ticker=args.ticker, portfolio_id=args.portfolio_id, limit=args.limit
                 )
                 if history:
-                    print("📜 Recent Analysis History:")
+                    analysis._print_header("RECENT ANALYSIS HISTORY", "📜")
                     print("┌─────────────────────┬─────────┬─────────────────┐")
                     print("│ Timestamp           │ Ticker  │ Recommendation  │")
                     print("├─────────────────────┼─────────┼─────────────────┤")
@@ -2340,14 +2372,14 @@ def main():
                         print(f"│ {ts:19} │ {tkr:7} │ {rec:15} │")
                     print("└─────────────────────┴─────────┴─────────────────┘")
                 else:
-                    print("📜 No analysis history found")
+                    analysis._print_warning("No analysis history found")
 
             elif cmd == 'accuracy':
                 trends = engine.get_accuracy_trends(
                     ticker=args.ticker, portfolio_id=args.portfolio_id
                 )
                 if trends:
-                    print("📈 Accuracy Trends:")
+                    analysis._print_header("ACCURACY TRENDS", "📈")
                     print("┌─────────┬─────────────────┬──────────────────┐")
                     print("│ Ticker  │ Avg Accuracy    │ Total Comparisons│")
                     print("├─────────┼─────────────────┼──────────────────┤")
@@ -2358,7 +2390,7 @@ def main():
                         print(f"│ {ticker:7} │ {accuracy:15} │ {total:16} │")
                     print("└─────────┴─────────────────┴─────────────────┘")
                 else:
-                    print("📈 No accuracy data found")
+                    analysis._print_warning("No accuracy data found")
             else:
                 portfolio_parser.print_help()
 
@@ -2367,7 +2399,7 @@ def main():
             try:
                 from ai_analyzer import AIAnalyzer, is_probable_portfolio_identifier
             except Exception as e:
-                print(f"❌ Failed to load AI analyzer: {e}")
+                analysis._print_error(f"Failed to load AI analyzer: {e}")
                 return
 
             call_llm = not args.no_llm
@@ -2388,22 +2420,22 @@ def main():
                 try:
                     tdata = engine.get_portfolio_tickers(portfolio_id)
                     if not tdata:
-                        print(f"❌ Portfolio {portfolio_id} has no tickers")
+                        analysis._print_error(f"Portfolio {portfolio_id} has no tickers")
                         return
                     tickers = [t['ticker'] for t in tdata]
-                    print(f"📁 Using portfolio {portfolio_id} with {len(tickers)} tickers")
+                    analysis._print_header(f"USING PORTFOLIO {portfolio_id} WITH {len(tickers)} TICKERS", "📁")
                 except Exception as e:
-                    print(f"❌ Failed to load portfolio: {e}")
+                    analysis._print_error(f"Failed to load portfolio: {e}")
                     return
 
             analyzer = AIAnalyzer(model=model_name)
 
             # Determine analysis mode
             if args.combined:
-                print(f"🤖 Running COMBINED analysis (comprehensive + AI) for: {', '.join(tickers)} (period {period})")
+                analysis._print_header(f"COMBINED ANALYSIS (COMPREHENSIVE + AI) FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
                 print("📊 This includes patterns, options, seasonal, and quantitative analysis...")
             else:
-                print(f"🤖 Running AI quantitative analysis for: {', '.join(tickers)} (period {period})")
+                analysis._print_header(f"AI QUANTITATIVE ANALYSIS FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
 
             if not call_llm:
                 print("🧪 LLM call disabled (--no-llm)")
@@ -2412,7 +2444,7 @@ def main():
 
             analyses = result.get('analyses', [])
             if not analyses:
-                print("❌ No analyses produced")
+                analysis._print_error("No analyses produced")
                 if result.get('errors'):
                     print("Errors:")
                     for k, v in result['errors'].items():
@@ -2447,7 +2479,7 @@ def main():
 
             import math
             # Summary table
-            print("\n📊 Quantitative Metrics (per ticker):")
+            analysis._print_header("QUANTITATIVE METRICS (PER TICKER)", "📊")
             header = (
                 "Ticker  Last  AvgDaily%  AnnVol%  MaxDD%  SMA50/200%  RSI14  BT_Str%  BT_Excess%  Trend"
             )
@@ -2463,7 +2495,7 @@ def main():
 
             # Display comprehensive analysis results if available
             if args.combined and result.get('comprehensive_recommendations'):
-                print("\n📋 Comprehensive Analysis Recommendations:")
+                analysis._print_header("COMPREHENSIVE ANALYSIS RECOMMENDATIONS", "📋")
                 comp_recs = result.get('comprehensive_recommendations', {})
                 for ticker, rec in comp_recs.items():
                     print(f"  {ticker}: {rec}")
@@ -2474,7 +2506,7 @@ def main():
             if call_llm and (llm_parsed or combined_recs):
                 # Display combined recommendations if available, otherwise standard AI recommendations
                 if args.combined and combined_recs:
-                    print("\n🎯 Combined AI + Comprehensive Recommendations:")
+                    analysis._print_header("COMBINED AI + COMPREHENSIVE RECOMMENDATIONS", "🎯")
                     tick_list = combined_recs.get('tickers') or []
                     if tick_list:
                         print("Ticker  AI-Rec  Comp-Rec  Final-Rec  Confidence")
@@ -2503,7 +2535,7 @@ def main():
                                     print(" -", r)
 
                 elif llm_parsed:
-                    print("\n🎯 AI Recommendations:")
+                    analysis._print_header("AI RECOMMENDATIONS", "🎯")
                     tick_list = llm_parsed.get('tickers') or []
                     if tick_list:
                         print("Ticker  Recommendation")
@@ -2527,14 +2559,14 @@ def main():
                                     print(" -", r)
 
             if result.get('errors'):
-                print("\n⚠️  Non-fatal errors:")
+                analysis._print_warning("Non-fatal errors:")
                 for k, v in result['errors'].items():
                     print(f"  {k}: {v}")
 
     except KeyboardInterrupt:
-        print("\n⚠️  Operation cancelled by user")
+        analysis._print_warning("Operation cancelled by user")
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        analysis._print_error(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

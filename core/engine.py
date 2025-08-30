@@ -695,7 +695,7 @@ class ClariFiEngine:
                                 if "coefficient_of_precision" in summary:
                                     ticker_results["coefficient_of_precision"] = summary["coefficient_of_precision"]
                         except Exception as e:
-                            print(f"⚠️  Deep analysis failed for {ticker}: {str(e)}")
+                            print(f"⚠️  Deep analysis failed HERE for {ticker}: {str(e)}")
                             ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
 
                     # Generate overall recommendation
@@ -1020,6 +1020,7 @@ class ClariFiEngine:
                 current_start = chunk_end
                 continue
 
+
             # Actual future window for evaluation
             future_start = chunk_end
             future_end = add_months(chunk_end, chunk_months)
@@ -1029,16 +1030,53 @@ class ClariFiEngine:
 
             actual_future_price = future_window[price_col].iloc[-1]
             reference_price = closes.iloc[-1]
-            actual_change = (actual_future_price / reference_price - 1) if reference_price else 0.0
+
+            # Coerce pandas Series/ndarray (one-row results) to scalar values
+            try:
+                if isinstance(actual_future_price, (pd.Series, pd.DataFrame, np.ndarray)):
+                    actual_future_price = actual_future_price.squeeze()
+                actual_future_price = float(actual_future_price) if pd.notna(actual_future_price) else None
+            except Exception:
+                actual_future_price = None
+
+            try:
+                if isinstance(reference_price, (pd.Series, pd.DataFrame, np.ndarray)):
+                    reference_price = reference_price.squeeze()
+                reference_price = float(reference_price) if pd.notna(reference_price) else None
+            except Exception:
+                reference_price = None
+
+            # Safely compute actual change: avoid truth-value checks on Series and handle None/zero
+            if reference_price is None or reference_price == 0:
+                actual_change = 0.0
+            else:
+                if actual_future_price is None:
+                    actual_change = 0.0
+                else:
+                    actual_change = (actual_future_price / reference_price - 1)
+
             actual_direction = 'BULLISH' if actual_change > 0 else 'BEARISH' if actual_change < 0 else 'FLAT'
 
+
+            # Ensure projected_change is a scalar (handle pandas Series/ndarray)
+            try:
+                if isinstance(projected_change, (pd.Series, pd.DataFrame, np.ndarray)):
+                    projected_change = projected_change.squeeze()
+                projected_change = float(projected_change) if pd.notna(projected_change) else None
+            except Exception:
+                projected_change = None
+
             # Metrics
-            price_change_error = abs(projected_change - actual_change)
+            # If either value is missing, treat the change as zero-difference
+            if projected_change is None:
+                price_change_error = abs(0.0 - actual_change)
+            else:
+                price_change_error = abs(projected_change - actual_change)
+
             # Convert to accuracy (1 - normalized error). Use a soft normalization factor.
             norm_factor = max(0.0001, abs(actual_change) + 0.02)
             price_accuracy = max(0.0, 1 - price_change_error / norm_factor)
             direction_accuracy = 1.0 if direction == actual_direction else 0.0
-
             chunk_results.append({
                 "chunk_start": current_start.isoformat(),
                 "chunk_end": chunk_end.isoformat(),

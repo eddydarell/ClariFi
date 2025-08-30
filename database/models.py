@@ -253,10 +253,10 @@ class Portfolio:
                     WHERE portfolio_id = ? AND ticker = ?
                 ''', (quantity, avg_cost, portfolio_id, ticker.upper()))
 
-                # Log transaction in the same connection/transaction
-                self._log_transaction_in_conn(conn, portfolio_id, ticker.upper(), "UPDATE_QUANTITY",
-                                            {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
-                                            {"quantity": quantity, "avg_cost": avg_cost})
+                # Log transaction
+                self._log_transaction(portfolio_id, ticker.upper(), "UPDATE_QUANTITY",
+                                    {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
+                                    {"quantity": quantity, "avg_cost": avg_cost})
                 ticker_id = existing["id"]
             else:
                 # Insert new ticker
@@ -265,9 +265,9 @@ class Portfolio:
                     VALUES (?, ?, ?, ?, ?)
                 ''', (ticker_id, portfolio_id, ticker.upper(), quantity, avg_cost))
 
-                # Log transaction in the same connection/transaction
-                self._log_transaction_in_conn(conn, portfolio_id, ticker.upper(), "ADD",
-                                            None, {"quantity": quantity, "avg_cost": avg_cost})
+                # Log transaction
+                self._log_transaction(portfolio_id, ticker.upper(), "ADD",
+                                    None, {"quantity": quantity, "avg_cost": avg_cost})
 
             conn.commit()
         return ticker_id
@@ -291,9 +291,9 @@ class Portfolio:
                     WHERE portfolio_id = ? AND ticker = ?
                 ''', (portfolio_id, ticker.upper()))
 
-                # Log transaction in the same connection/transaction
-                self._log_transaction_in_conn(conn, portfolio_id, ticker.upper(), "REMOVE",
-                                            dict(ticker_data), None)
+                # Log transaction
+                self._log_transaction(portfolio_id, ticker.upper(), "REMOVE",
+                                    dict(ticker_data), None)
 
                 conn.commit()
                 return cursor.rowcount > 0
@@ -342,20 +342,6 @@ class Portfolio:
                   json.dumps(new_value) if new_value else None,
                   notes))
             conn.commit()
-    
-    def _log_transaction_in_conn(self, conn, portfolio_id: str, ticker: str, transaction_type: str,
-                                old_value: dict = None, new_value: dict = None, notes: str = ""):
-        """Log a portfolio transaction using an existing connection (to avoid nested transactions)"""
-        transaction_id = str(uuid.uuid4())
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO portfolio_transactions
-            (id, portfolio_id, ticker, transaction_type, old_value, new_value, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (transaction_id, portfolio_id, ticker, transaction_type,
-              json.dumps(old_value) if old_value else None,
-              json.dumps(new_value) if new_value else None,
-              notes))
 
     def get_tickers(self, portfolio_id: str) -> List[Dict[str, Any]]:
         """Get all tickers in a portfolio"""
