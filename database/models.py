@@ -15,23 +15,23 @@ DATABASE_PATH = "clarifi.db"
 
 class DatabaseManager:
 
-    def insert_event(self, event_date: str, event: str, category: str, impact: str, event_id: Optional[str] = None):
+    def insert_event(self, event_date: str, event: str, category: str, impact: str, summary: str = "", link: str = "", event_id: Optional[str] = None):
         """Insert a new event into the events table."""
         if event_id is None:
             event_id = str(uuid.uuid4())
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO events (id, event_date, event, category, impact)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (event_id, event_date, event, category, impact))
+                INSERT OR REPLACE INTO events (id, event_date, event, category, impact, summary, link)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (event_id, event_date, event, category, impact, summary, link))
             conn.commit()
 
     def get_all_events(self) -> List[Dict[str, Any]]:
         """Fetch all events from the events table."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT event_date, event, category, impact FROM events ORDER BY event_date ASC')
+            cursor.execute('SELECT id, event_date, event, category, impact, summary, link, created_at FROM events ORDER BY event_date ASC')
             return [dict(row) for row in cursor.fetchall()]
     """Manages SQLite database operations for ClariFi"""
 

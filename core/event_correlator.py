@@ -40,6 +40,21 @@ class EventCorrelator:
             for e in events
         }
 
+    def _parse_event_date(self, event_date):
+        """Safely parse event date, handling malformed dates and yyyy-mm format."""
+        try:
+            # Clean the date string
+            cleaned_date = event_date.replace('–', '-')  # Replace en-dash with hyphen
+
+            # Check if it's yyyy-mm format and add day 10
+            if len(cleaned_date.split('-')) == 2:
+                cleaned_date += '-10'
+
+            return pd.to_datetime(cleaned_date)
+        except Exception as e:
+            print(f"Warning: Could not parse event date '{event_date}': {e}")
+            return None
+
     def correlate_events_with_movements(self, stock_data_dict, lookback_days=5, lookahead_days=5):
         """
         Correlate major events with stock movements.
@@ -55,7 +70,10 @@ class EventCorrelator:
         correlations = {}
 
         for event_date, event_info in self.major_events.items():
-            event_dt = pd.to_datetime(event_date)
+            # Handle malformed dates and yyyy-mm format
+            event_dt = self._parse_event_date(event_date)
+            if event_dt is None:
+                continue
 
             correlations[event_date] = {
                 'event_info': event_info,
@@ -166,7 +184,10 @@ class EventCorrelator:
         target_dt = pd.to_datetime(target_date)
 
         for event_date, event_info in self.major_events.items():
-            event_dt = pd.to_datetime(event_date)
+            event_dt = self._parse_event_date(event_date)
+            if event_dt is None:
+                continue
+
             days_diff = abs((target_dt - event_dt).days)
 
             if days_diff <= window_days:
@@ -283,5 +304,10 @@ class EventCorrelator:
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
 
-        return {date: info for date, info in self.major_events.items()
-                if start_dt <= pd.to_datetime(date) <= end_dt}
+        filtered_events = {}
+        for date, info in self.major_events.items():
+            event_dt = self._parse_event_date(date)
+            if event_dt is not None and start_dt <= event_dt <= end_dt:
+                filtered_events[date] = info
+
+        return filtered_events

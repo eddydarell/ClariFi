@@ -1561,6 +1561,16 @@ def main():
     av_gainers_losers = av_sub.add_parser('top-gainers-losers', help='📊 Get top gainers, losers, and most actively traded tickers')
     av_gainers_losers.add_argument('--format', choices=['table', 'json'], default='table', help='Output format (default: table)')
 
+    # Event ingestion command
+    ingest_parser = subparsers.add_parser('ingest', help='📥 Ingest event data from JSON files')
+    ingest_parser.add_argument('--file', '-f', help='Path to a specific JSON file to import')
+    ingest_parser.add_argument('--ingest-dir', '-i', default='ingest', help='Directory containing JSON files (default: ingest)')
+    ingest_parser.add_argument('--ingested-dir', '-o', default='ingested', help='Directory for processed files (default: ingested)')
+    ingest_parser.add_argument('--process', action='store_true', help='Process all files in ingest folder once')
+    ingest_parser.add_argument('--monitor', action='store_true', help='Monitor ingest folder continuously')
+    ingest_parser.add_argument('--interval', type=int, default=60, help='Monitoring interval in seconds (default: 60)')
+    ingest_parser.add_argument('--no-skip-duplicates', action='store_true', help='Do not skip duplicate events')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -2958,6 +2968,60 @@ def main():
 
             else:
                 av_parser.print_help()
+
+        elif args.command == 'ingest':
+            # Event ingestion command
+            try:
+                from ingest_events import import_events_from_json, process_ingest_folder, monitor_ingest_folder
+            except ImportError:
+                analysis._print_error("Could not import ingestion module. Make sure ingest_events.py is available.")
+                return
+
+            skip_duplicates = not getattr(args, 'no_skip_duplicates', False)
+
+            if args.file:
+                # Import specific file
+                analysis._print_header(f"EVENT DATA INGESTION: {args.file}", "📥")
+                imported_count = import_events_from_json(args.file, skip_duplicates=skip_duplicates)
+                if imported_count > 0:
+                    analysis._print_success(f"Successfully imported {imported_count} events from {args.file}")
+                else:
+                    analysis._print_warning(f"No events imported from {args.file}")
+
+            elif args.monitor:
+                # Monitor folder continuously
+                analysis._print_header("EVENT INGESTION MONITOR", "📡")
+                print(f"📁 Ingest Directory: {args.ingest_dir}")
+                print(f"📁 Processed Directory: {args.ingested_dir}")
+                print(f"⏱️ Monitoring Interval: {args.interval} seconds")
+                print(f"🔄 Skip Duplicates: {skip_duplicates}")
+                print()
+                print("🚀 Starting continuous monitoring... (Press Ctrl+C to stop)")
+                monitor_ingest_folder(
+                    ingest_dir=args.ingest_dir,
+                    ingested_dir=args.ingested_dir,
+                    interval=args.interval,
+                    skip_duplicates=skip_duplicates
+                )
+
+            else:
+                # Process folder once (default)
+                analysis._print_header("EVENT INGESTION PROCESSING", "📥")
+                print(f"📁 Ingest Directory: {args.ingest_dir}")
+                print(f"📁 Processed Directory: {args.ingested_dir}")
+                print(f"🔄 Skip Duplicates: {skip_duplicates}")
+                print()
+
+                total_imported = process_ingest_folder(
+                    ingest_dir=args.ingest_dir,
+                    ingested_dir=args.ingested_dir,
+                    skip_duplicates=skip_duplicates
+                )
+
+                if total_imported > 0:
+                    analysis._print_success(f"Successfully processed {total_imported} events")
+                else:
+                    analysis._print_warning("No events were processed")
 
     except KeyboardInterrupt:
         analysis._print_warning("Operation cancelled by user")
