@@ -78,11 +78,83 @@ class AdvancedStockAnalysis:
         """Print an info message."""
         print(f"ℹ️  {message}")
 
+    def _convert_to_json_serializable(self, obj):
+        """Convert pandas objects and other non-JSON serializable objects to JSON-compatible formats."""
+        if obj is None:
+            return None
+
+        # Handle pandas DataFrame
+        if hasattr(obj, 'to_dict'):
+            try:
+                # Convert DataFrame to dict, ensuring datetime indices are converted
+                df_dict = obj.to_dict()
+                # Convert any Timestamp keys to strings
+                if hasattr(obj, 'index') and hasattr(obj.index, 'dtype'):
+                    if 'datetime' in str(obj.index.dtype).lower():
+                        # If index is datetime, convert to string keys
+                        return {str(k): v for k, v in df_dict.items()}
+                return df_dict
+            except:
+                return str(obj)
+
+        # Handle pandas Series
+        if hasattr(obj, 'to_list'):
+            try:
+                return obj.to_list()
+            except:
+                return str(obj)
+
+        # Handle dictionaries recursively
+        if isinstance(obj, dict):
+            result = {}
+            for key, value in obj.items():
+                # Convert Timestamp keys to strings
+                if hasattr(key, 'isoformat'):
+                    key = key.isoformat()
+                elif hasattr(key, 'strftime'):
+                    key = key.strftime('%Y-%m-%d')
+                else:
+                    key = str(key)
+                result[key] = self._convert_to_json_serializable(value)
+            return result
+
+        # Handle lists/tuples recursively
+        if isinstance(obj, (list, tuple)):
+            return [self._convert_to_json_serializable(item) for item in obj]
+
+        # Handle numpy types
+        if hasattr(obj, 'item'):
+            try:
+                return obj.item()
+            except:
+                return str(obj)
+
+        # Handle datetime objects
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+
+        # Handle pandas Timestamp
+        if hasattr(obj, 'to_pydatetime'):
+            try:
+                return obj.to_pydatetime().isoformat()
+            except:
+                return str(obj)
+
+        # For other objects, try to convert to string
+        try:
+            # Check if it's a basic type
+            if isinstance(obj, (str, int, float, bool, type(None))):
+                return obj
+            else:
+                return str(obj)
+        except:
+            return str(obj)
+
     def comprehensive_analysis(self, tickers, period="1y", download=True,
                              include_patterns=True, include_events=True,
                              include_advanced_viz=True, include_options=True,
                              include_investment_advice=True, include_seasonal=True,
-                             include_deep=False, deep_chunk_months=3):
+                             include_deep=False, deep_chunk_months=3, json_output=False):
         """
         Perform comprehensive market analysis including patterns, events, options, and investment advice.
 
@@ -98,37 +170,67 @@ class AdvancedStockAnalysis:
             include_seasonal (bool): Whether to include seasonal analysis
             include_deep (bool): Whether to include deep backtesting analysis
             deep_chunk_months (int): Chunk size in months for deep analysis
+            json_output (bool): Whether to return structured data instead of printing
         """
-        self._print_header("COMPREHENSIVE MARKET ANALYSIS")
-        print(f"📈 Tickers: {', '.join(tickers)}")
-        print(f"⏰ Period: {period}")
-        features = []
-        if include_patterns: features.append("Patterns")
-        if include_events: features.append("Events")
-        if include_advanced_viz: features.append("Advanced Viz")
-        if include_options: features.append("Options")
-        if include_investment_advice: features.append("Investment Advice")
-        if include_seasonal: features.append("Seasonal")
-        if include_deep: features.append("Deep Analysis")
-        print(f"🔧 Analysis Features: {', '.join(features)}")
-        if include_deep:
-            print(f"🔬 Deep Analysis: Chunk size = {deep_chunk_months} months")
-        print()
+        if not json_output:
+            self._print_header("COMPREHENSIVE MARKET ANALYSIS")
+            print(f"📈 Tickers: {', '.join(tickers)}")
+            print(f"⏰ Period: {period}")
+            features = []
+            if include_patterns: features.append("Patterns")
+            if include_events: features.append("Events")
+            if include_advanced_viz: features.append("Advanced Viz")
+            if include_options: features.append("Options")
+            if include_investment_advice: features.append("Investment Advice")
+            if include_seasonal: features.append("Seasonal")
+            if include_deep: features.append("Deep Analysis")
+            print(f"🔧 Analysis Features: {', '.join(features)}")
+            if include_deep:
+                print(f"🔬 Deep Analysis: Chunk size = {deep_chunk_months} months")
+            print()
+
+        # Initialize result structure for JSON output
+        result = {
+            "command": "analyze",
+            "tickers": tickers,
+            "period": period,
+            "features": [],
+            "data": {},
+            "analyses": {},
+            "recommendations": {},
+            "errors": []
+        }
+
+        if include_patterns: result["features"].append("patterns")
+        if include_events: result["features"].append("events")
+        if include_advanced_viz: result["features"].append("advanced_visualizations")
+        if include_options: result["features"].append("options")
+        if include_investment_advice: result["features"].append("investment_advice")
+        if include_seasonal: result["features"].append("seasonal")
+        if include_deep: result["features"].append("deep_analysis")
 
         # Step 1: Download data
         stock_data_dict = {}
         if download:
-            self._print_section_header("DOWNLOADING STOCK DATA")
+            if not json_output:
+                self._print_section_header("DOWNLOADING STOCK DATA")
             results = self.downloader.download_multiple_stocks(tickers, None, None, period)
 
             if not results:
-                self._print_error("No data downloaded. Exiting.")
-                return
+                error_msg = "No data downloaded. Exiting."
+                if json_output:
+                    result["errors"].append(error_msg)
+                    return result
+                else:
+                    self._print_error(error_msg)
+                    return
 
-            self._print_success("Data download completed!")
+            if not json_output:
+                self._print_success("Data download completed!")
 
         # Load data into memory
-        self._print_section_header("LOADING DATA")
+        if not json_output:
+            self._print_section_header("LOADING DATA")
         for ticker in tickers:
             files = self.visualizer.find_stock_files(ticker)
             if files:
@@ -136,13 +238,34 @@ class AdvancedStockAnalysis:
                 data = self.visualizer.load_stock_data(latest_file)
                 if data is not None:
                     stock_data_dict[ticker] = data
-                    print(f"  ✓ {ticker}: {len(data)} records loaded")
+                    result["data"][ticker] = {
+                        "records": len(data),
+                        "date_range": {
+                            "start": str(data.index.min()) if not data.empty else None,
+                            "end": str(data.index.max()) if not data.empty else None
+                        }
+                    }
+                    if not json_output:
+                        print(f"  ✓ {ticker}: {len(data)} records loaded")
                 else:
-                    print(f"  ❌ {ticker}: Failed to load data")
+                    error_msg = f"Failed to load data for {ticker}"
+                    result["errors"].append(error_msg)
+                    if not json_output:
+                        print(f"  ❌ {ticker}: {error_msg}")
+            else:
+                error_msg = f"No data files found for {ticker}"
+                result["errors"].append(error_msg)
+                if not json_output:
+                    print(f"  ❌ {ticker}: {error_msg}")
 
         if not stock_data_dict:
-            self._print_error("No valid data loaded. Exiting.")
-            return
+            error_msg = "No valid data loaded. Exiting."
+            if json_output:
+                result["errors"].append(error_msg)
+                return result
+            else:
+                self._print_error(error_msg)
+                return
         # Step 2: Pattern Analysis
         correlation_results = None
         volatility_results = None
@@ -150,18 +273,21 @@ class AdvancedStockAnalysis:
         technical_results = {}
 
         if include_patterns:
-            self._print_section_header("PATTERN ANALYSIS")
-
-            self._print_subsection("Analyzing correlation patterns")
+            if not json_output:
+                self._print_section_header("PATTERN ANALYSIS")
+                self._print_subsection("Analyzing correlation patterns")
             correlation_results = self.pattern_analyzer.analyze_correlation_patterns(stock_data_dict)
 
-            self._print_subsection("Analyzing volatility patterns")
+            if not json_output:
+                self._print_subsection("Analyzing volatility patterns")
             volatility_results = self.pattern_analyzer.detect_volatility_patterns(stock_data_dict)
 
-            self._print_subsection("Analyzing trend strength")
+            if not json_output:
+                self._print_subsection("Analyzing trend strength")
             trend_results = self.pattern_analyzer.analyze_trend_strength(stock_data_dict)
 
-            self._print_subsection("Adding technical indicators")
+            if not json_output:
+                self._print_subsection("Adding technical indicators")
             for ticker, data in stock_data_dict.items():
                 self.pattern_analyzer.add_technical_indicators(data)
                 # Capture last available indicator values for reporting
@@ -178,59 +304,83 @@ class AdvancedStockAnalysis:
                 except Exception:
                     technical_results[ticker] = {}
 
-            self._print_success("Pattern analysis completed!")
+            result["analyses"]["patterns"] = {
+                "correlation": self._convert_to_json_serializable(correlation_results) if json_output else correlation_results,
+                "volatility": self._convert_to_json_serializable(volatility_results) if json_output else volatility_results,
+                "trend_strength": self._convert_to_json_serializable(trend_results) if json_output else trend_results,
+                "technical_indicators": technical_results
+            }
+
+            if not json_output:
+                self._print_success("Pattern analysis completed!")
 
         # Step 3: Event Correlation
         event_results = None
         unusual_movements = None
 
         if include_events:
-            self._print_section_header("EVENT CORRELATION ANALYSIS")
-
-            self._print_subsection("Correlating with major events")
+            if not json_output:
+                self._print_section_header("EVENT CORRELATION ANALYSIS")
+                self._print_subsection("Correlating with major events")
             event_results = self.event_correlator.correlate_events_with_movements(stock_data_dict)
 
-            self._print_subsection("Identifying unusual movements")
+            if not json_output:
+                self._print_subsection("Identifying unusual movements")
             unusual_movements = self.event_correlator.identify_unusual_movements(stock_data_dict)
 
-            self._print_success("Event correlation completed!")
+            result["analyses"]["events"] = {
+                "correlations": self._convert_to_json_serializable(event_results) if json_output else event_results,
+                "unusual_movements": self._convert_to_json_serializable(unusual_movements) if json_output else unusual_movements
+            }
+
+            if not json_output:
+                self._print_success("Event correlation completed!")
 
         # Step 4: Advanced Visualizations
         if include_advanced_viz:
-            self._print_section_header("CREATING ADVANCED VISUALIZATIONS")
+            if not json_output:
+                self._print_section_header("CREATING ADVANCED VISUALIZATIONS")
 
             if correlation_results:
-                self._print_subsection("Creating correlation heatmaps")
+                if not json_output:
+                    self._print_subsection("Creating correlation heatmaps")
                 self.advanced_visualizer.plot_correlation_heatmap(correlation_results)
-                self._print_subsection("Creating rolling correlation plots")
+                if not json_output:
+                    self._print_subsection("Creating rolling correlation plots")
                 self.advanced_visualizer.plot_rolling_correlations(correlation_results)
 
             if volatility_results:
-                self._print_subsection("Creating volatility clustering plots")
+                if not json_output:
+                    self._print_subsection("Creating volatility clustering plots")
                 self.advanced_visualizer.plot_volatility_clustering(volatility_results)
 
             if event_results:
-                self._print_subsection("Creating event impact visualizations")
+                if not json_output:
+                    self._print_subsection("Creating event impact visualizations")
                 self.advanced_visualizer.plot_event_impact_analysis(event_results)
 
             # Support/Resistance for first available ticker
             if stock_data_dict:
                 first_ticker = list(stock_data_dict.keys())[0]
-                self._print_subsection(f"Creating support/resistance for {first_ticker}")
+                if not json_output:
+                    self._print_subsection(f"Creating support/resistance for {first_ticker}")
                 sr_data = self.pattern_analyzer.identify_support_resistance(
                     stock_data_dict[first_ticker], first_ticker)
                 self.advanced_visualizer.plot_support_resistance(
                     sr_data, stock_data_dict[first_ticker])
 
-            self._print_success("Advanced visualizations completed!")
+            if not json_output:
+                self._print_success("Advanced visualizations completed!")
 
         # Step 5: Enhanced Options Analysis and Risk Assessment
         options_results = {}
         if include_options:
-            self._print_section_header("ENHANCED OPTIONS & RISK ANALYSIS")
+            if not json_output:
+                self._print_section_header("ENHANCED OPTIONS & RISK ANALYSIS")
             for ticker in tickers:
                 if ticker in stock_data_dict:
-                    self._print_subsection(f"Analyzing comprehensive risk for {ticker}")
+                    if not json_output:
+                        self._print_subsection(f"Analyzing comprehensive risk for {ticker}")
                     risk_analysis = self.options_analyzer.comprehensive_risk_analysis(stock_data_dict[ticker])
 
                     # Also get the traditional options analysis for pricing data
@@ -240,44 +390,49 @@ class AdvancedStockAnalysis:
                     merged_results = {**risk_analysis, **options_analysis}
                     options_results[ticker] = merged_results
 
-                    # Display key metrics
-                    current_price = risk_analysis['current_price']
-                    current_vol = risk_analysis['current_volatility']
-                    risk_level = risk_analysis['risk_assessment']
+                    if not json_output:
+                        # Display key metrics
+                        current_price = risk_analysis['current_price']
+                        current_vol = risk_analysis['current_volatility']
+                        risk_level = risk_analysis['risk_assessment']
 
-                    # Get comprehensive risk metrics
-                    advanced_var = risk_analysis.get('advanced_var_measures', {})
-                    risk_ratios = risk_analysis.get('risk_ratios', {})
-                    var_95_pct = advanced_var.get('var_95_pct', 0)
-                    sharpe_ratio = risk_ratios.get('sharpe_ratio', 0)
+                        # Get comprehensive risk metrics
+                        advanced_var = risk_analysis.get('advanced_var_measures', {})
+                        risk_ratios = risk_analysis.get('risk_ratios', {})
+                        var_95_pct = advanced_var.get('var_95_pct', 0)
+                        sharpe_ratio = risk_ratios.get('sharpe_ratio', 0)
 
-                    print(f"    💰 Current Price: ${current_price:.2f}")
-                    print(f"    📊 Current Volatility: {current_vol:.1%}")
-                    print(f"    ⚠️  Risk Level: {risk_level}")
-                    print(f"    📊 VaR (95%): {var_95_pct:.1f}% daily")
+                        print(f"    💰 Current Price: ${current_price:.2f}")
+                        print(f"    📊 Current Volatility: {current_vol:.1%}")
+                        print(f"    ⚠️  Risk Level: {risk_level}")
+                        print(f"    📊 VaR (95%): {var_95_pct:.1f}% daily")
 
-                    if sharpe_ratio != 0:
-                        sharpe_emoji = "🌟" if sharpe_ratio > 1.0 else "📊" if sharpe_ratio > 0.5 else "❌"
-                        print(f"    {sharpe_emoji} Sharpe Ratio: {sharpe_ratio:.2f}")
+                        if sharpe_ratio != 0:
+                            sharpe_emoji = "🌟" if sharpe_ratio > 1.0 else "📊" if sharpe_ratio > 0.5 else "❌"
+                            print(f"    {sharpe_emoji} Sharpe Ratio: {sharpe_ratio:.2f}")
 
-                    vol_percentile = risk_analysis.get('volatility_percentile', 'N/A')
-                    if vol_percentile != 'N/A':
-                        print(f"    📈 Volatility Percentile: {vol_percentile:.1f}%")
+                        vol_percentile = risk_analysis.get('volatility_percentile', 'N/A')
+                        if vol_percentile != 'N/A':
+                            print(f"    📈 Volatility Percentile: {vol_percentile:.1f}%")
 
-                    # Show expected moves for key timeframes
-                    for timeframe in ['30d', '90d']:
-                        if timeframe in risk_analysis['risk_metrics']:
-                            metrics = risk_analysis['risk_metrics'][timeframe]
-                            expected_move = metrics['expected_move']
-                            print(f"    🎯 Expected {timeframe} move: ±{expected_move:.1%}")
+                        # Show expected moves for key timeframes
+                        for timeframe in ['30d', '90d']:
+                            if timeframe in risk_analysis['risk_metrics']:
+                                metrics = risk_analysis['risk_metrics'][timeframe]
+                                expected_move = metrics['expected_move']
+                                print(f"    🎯 Expected {timeframe} move: ±{expected_move:.1%}")
 
-            self._print_success("Options analysis completed!")
+            result["analyses"]["options"] = self._convert_to_json_serializable(options_results) if json_output else options_results
+
+            if not json_output:
+                self._print_success("Options analysis completed!")
 
         # Step 6: Investment Suggestions
         investment_suggestions = {}
         portfolio_advice = None
         if include_investment_advice:
-            self._print_section_header("GENERATING INVESTMENT SUGGESTIONS")
+            if not json_output:
+                self._print_section_header("GENERATING INVESTMENT SUGGESTIONS")
 
             # Prepare comprehensive data for investment advisor
             portfolio_data = {}
@@ -290,70 +445,83 @@ class AdvancedStockAnalysis:
                     }
 
             # Generate portfolio-level suggestions
-            self._print_subsection("Analyzing portfolio recommendations")
+            if not json_output:
+                self._print_subsection("Analyzing portfolio recommendations")
             portfolio_advice = self.investment_advisor.get_portfolio_suggestions(
                 portfolio_data, correlation_results
             )
 
             # Display individual suggestions
-            for ticker, suggestion in portfolio_advice['individual_suggestions'].items():
-                action_emoji = "🟢" if suggestion['suggestion'] == 'BUY' else \
-                              "🔴" if suggestion['suggestion'] == 'SELL' else "🟡"
-                confidence_emoji = "🔥" if suggestion['confidence'] == 'HIGH' else \
-                                  "👍" if suggestion['confidence'] == 'MEDIUM' else "🤔"
+            if not json_output:
+                for ticker, suggestion in portfolio_advice['individual_suggestions'].items():
+                    action_emoji = "🟢" if suggestion['suggestion'] == 'BUY' else \
+                                  "🔴" if suggestion['suggestion'] == 'SELL' else "🟡"
+                    confidence_emoji = "🔥" if suggestion['confidence'] == 'HIGH' else \
+                                      "👍" if suggestion['confidence'] == 'MEDIUM' else "🤔"
 
-                print(f"  {action_emoji} {ticker}: {suggestion['suggestion']} "
-                      f"({suggestion['confidence']} confidence) {confidence_emoji}")
-                print(f"    Risk: {suggestion['risk_level']}")
-                print(f"    Reasoning: {suggestion['reasoning']}")
+                    print(f"  {action_emoji} {ticker}: {suggestion['suggestion']} "
+                          f"({suggestion['confidence']} confidence) {confidence_emoji}")
+                    print(f"    Risk: {suggestion['risk_level']}")
+                    print(f"    Reasoning: {suggestion['reasoning']}")
 
-                # Display enhanced features: holding period and recovery forecast
-                if 'holding_period_analysis' in suggestion:
-                    holding = suggestion['holding_period_analysis']
-                    print(f"    ⏱️  Suggested Holding Period: {holding['suggested_holding_days']} days ({holding['confidence']} confidence)")
+                    # Display enhanced features: holding period and recovery forecast
+                    if 'holding_period_analysis' in suggestion:
+                        holding = suggestion['holding_period_analysis']
+                        print(f"    ⏱️  Suggested Holding Period: {holding['suggested_holding_days']} days ({holding['confidence']} confidence)")
 
-                if 'recovery_forecast' in suggestion:
-                    recovery = suggestion['recovery_forecast']
-                    if recovery.get('is_currently_in_dip', False) and recovery.get('forecast_recovery_date'):
-                        print(f"    🔮 Recovery Forecast: {recovery['forecast_recovery_date']} ({recovery.get('confidence', 'UNKNOWN')} confidence)")
-                        print(f"    📉 Currently in dip: {recovery.get('current_dip_magnitude', 0):.1%} from recent high")
-                    elif not recovery.get('is_currently_in_dip', True) and recovery.get('recovery_statistics'):
-                        stats = recovery['recovery_statistics']
-                        print(f"    📈 Historical Recovery Pattern: {stats.get('average_days', 0):.1f} days average")
-                print()
+                    if 'recovery_forecast' in suggestion:
+                        recovery = suggestion['recovery_forecast']
+                        if recovery.get('is_currently_in_dip', False) and recovery.get('forecast_recovery_date'):
+                            print(f"    🔮 Recovery Forecast: {recovery['forecast_recovery_date']} ({recovery.get('confidence', 'UNKNOWN')} confidence)")
+                            print(f"    📉 Currently in dip: {recovery.get('current_dip_magnitude', 0):.1%} from recent high")
+                        elif not recovery.get('is_currently_in_dip', True) and recovery.get('recovery_statistics'):
+                            stats = recovery['recovery_statistics']
+                            print(f"    📈 Historical Recovery Pattern: {stats.get('average_days', 0):.1f} days average")
+                    print()
 
-            self._print_success("Investment suggestions completed!")
+            result["analyses"]["investment_advice"] = self._convert_to_json_serializable(portfolio_advice) if json_output else portfolio_advice
+
+            if not json_output:
+                self._print_success("Investment suggestions completed!")
 
         # Step 6.5: Seasonal Analysis
         seasonal_results = {}
         if include_seasonal:
-            self._print_section_header("SEASONAL ANALYSIS")
+            if not json_output:
+                self._print_section_header("SEASONAL ANALYSIS")
             for ticker in tickers:
                 if ticker in stock_data_dict:
-                    self._print_subsection(f"Analyzing seasonal patterns for {ticker}")
+                    if not json_output:
+                        self._print_subsection(f"Analyzing seasonal patterns for {ticker}")
                     seasonal_result = self.seasonal_analyzer.analyze(stock_data_dict[ticker])
                     if seasonal_result:
                         seasonal_results[ticker] = seasonal_result
 
-                        # Display key seasonal insights
-                        print(f"    🌟 Recommendation: {seasonal_result['recommendation']}")
-                        print(f"    📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
-                        print(f"    📈 Best Months: {', '.join(seasonal_result['best_months'])}")
-                        print(f"    📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
-                        print(f"    💡 Pattern: {seasonal_result['seasonal_summary']}")
+                        if not json_output:
+                            # Display key seasonal insights
+                            print(f"    🌟 Recommendation: {seasonal_result['recommendation']}")
+                            print(f"    📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
+                            print(f"    📈 Best Months: {', '.join(seasonal_result['best_months'])}")
+                            print(f"    📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
+                            print(f"    💡 Pattern: {seasonal_result['seasonal_summary']}")
                     else:
-                        self._print_warning(f"Insufficient data for seasonal analysis")
+                        if not json_output:
+                            self._print_warning(f"Insufficient data for seasonal analysis")
 
-            if seasonal_results:
-                self._print_success("Seasonal analysis completed!")
-            else:
-                self._print_warning("No seasonal patterns detected (insufficient data)")
+            result["analyses"]["seasonal"] = self._convert_to_json_serializable(seasonal_results) if json_output else seasonal_results
+
+            if not json_output:
+                if seasonal_results:
+                    self._print_success("Seasonal analysis completed!")
+                else:
+                    self._print_warning("No seasonal patterns detected (insufficient data)")
 
         # Step 6.6: Deep Analysis (Historical Backtesting)
         deep_results = {}
         if include_deep:
-            self._print_section_header("DEEP BACKTESTING ANALYSIS")
-            print(f"   🔬 Chunk size: {deep_chunk_months} months")
+            if not json_output:
+                self._print_section_header("DEEP BACKTESTING ANALYSIS")
+                print(f"   🔬 Chunk size: {deep_chunk_months} months")
 
             # Import the engine for deep analysis functionality
             try:
@@ -362,7 +530,8 @@ class AdvancedStockAnalysis:
 
                 for ticker in tickers:
                     if ticker in stock_data_dict:
-                        self._print_subsection(f"Running deep analysis for {ticker}")
+                        if not json_output:
+                            self._print_subsection(f"Running deep analysis for {ticker}")
                         try:
                             deep_result = engine._run_deep_analysis(
                                 ticker,
@@ -371,42 +540,60 @@ class AdvancedStockAnalysis:
                             )
                             if deep_result and not deep_result.get('error'):
                                 deep_results[ticker] = deep_result
-                                summary = deep_result.get('summary', {})
-                                precision = summary.get('coefficient_of_precision', 0)
-                                chunks_eval = summary.get('chunks_evaluated', 0)
-                                print(f"    ✓ Precision coefficient: {precision:.2%}")
-                                print(f"    📊 Evaluated {chunks_eval} chunks")
+                                if not json_output:
+                                    summary = deep_result.get('summary', {})
+                                    precision = summary.get('coefficient_of_precision', 0)
+                                    chunks_eval = summary.get('chunks_evaluated', 0)
+                                    print(f"    ✓ Precision coefficient: {precision:.2%}")
+                                    print(f"    📊 Evaluated {chunks_eval} chunks")
                             else:
                                 error_msg = deep_result.get('error', 'Unknown error') if deep_result else 'Failed to execute'
-                                print(f"    ❌ Deep analysis failed: {error_msg}")
+                                if not json_output:
+                                    print(f"    ❌ Deep analysis failed: {error_msg}")
+                                result["errors"].append(f"Deep analysis failed for {ticker}: {error_msg}")
                         except Exception as e:
-                            print(f"    ❌ Deep analysis error for {ticker}: {str(e)}")
+                            error_msg = str(e)
+                            if not json_output:
+                                print(f"    ❌ Deep analysis error for {ticker}: {error_msg}")
+                            result["errors"].append(f"Deep analysis error for {ticker}: {error_msg}")
                     else:
-                        print(f"    ⚠️  No data available for {ticker}")
+                        if not json_output:
+                            print(f"    ⚠️  No data available for {ticker}")
 
-                if deep_results:
-                    self._print_success("Deep analysis completed!")
-                else:
-                    self._print_warning("No deep analysis results generated")
+                result["analyses"]["deep"] = self._convert_to_json_serializable(deep_results) if json_output else deep_results
+
+                if not json_output:
+                    if deep_results:
+                        self._print_success("Deep analysis completed!")
+                    else:
+                        self._print_warning("No deep analysis results generated")
 
             except ImportError as e:
-                print(f"    ❌ Could not import engine for deep analysis: {e}")
-                self._print_warning("Deep analysis requires the ClariFiEngine module")
+                error_msg = f"Could not import engine for deep analysis: {e}"
+                if not json_output:
+                    print(f"    ❌ {error_msg}")
+                    self._print_warning("Deep analysis requires the ClariFiEngine module")
+                result["errors"].append(error_msg)
 
-    # Step 7: Generate Summary Report
-        self._print_section_header("GENERATING ANALYSIS SUMMARY")
-        self._generate_summary_report(tickers, correlation_results, volatility_results,
-                trend_results, event_results, unusual_movements,
-                options_results, portfolio_advice, seasonal_results, deep_results,
-                technical_results=technical_results)
+        # Step 7: Generate Summary Report
+        if not json_output:
+            self._print_section_header("GENERATING ANALYSIS SUMMARY")
+            self._generate_summary_report(tickers, correlation_results, volatility_results,
+                    trend_results, event_results, unusual_movements,
+                    options_results, portfolio_advice, seasonal_results, deep_results,
+                    technical_results=technical_results)
 
-        print("\n" + "=" * 60)
-        self._print_success("COMPREHENSIVE ANALYSIS COMPLETED!")
-        print(f"📁 Data files: {self.downloader.data_dir}/")
-        print(f"📊 Visualizations: {self.visualizer.output_dir}/")
-        print(f"📈 Advanced charts: {self.advanced_visualizer.output_dir}/")
+            print("\n" + "=" * 60)
+            self._print_success("COMPREHENSIVE ANALYSIS COMPLETED!")
+            print(f"📁 Data files: {self.downloader.data_dir}/")
+            print(f"📊 Visualizations: {self.visualizer.output_dir}/")
+            print(f"📈 Advanced charts: {self.advanced_visualizer.output_dir}/")
 
-    def seasonal_only(self, tickers, period="5y", download=True):
+        # Return structured result if JSON output requested
+        if json_output:
+            return result
+
+    def seasonal_only(self, tickers, period="5y", download=True, json_output=False):
         """
         Perform seasonal analysis only for the given tickers.
 
@@ -414,14 +601,25 @@ class AdvancedStockAnalysis:
             tickers (list): List of stock tickers
             period (str): Time period for data (default 5y for better seasonal patterns)
             download (bool): Whether to download fresh data
+            json_output (bool): Whether to return structured data instead of printing
         """
-        self._print_header("SEASONAL & HOLIDAY ANALYSIS", "🗓️")
-        print(f"📈 Tickers: {', '.join(tickers)}")
-        print(f"⏰ Period: {period}")
-        print()
+        if not json_output:
+            self._print_header("SEASONAL & HOLIDAY ANALYSIS", "🗓️")
+            print(f"📈 Tickers: {', '.join(tickers)}")
+            print(f"⏰ Period: {period}")
+            print()
+
+        result = {
+            "command": "seasonal",
+            "tickers": tickers,
+            "period": period,
+            "data": {},
+            "analyses": {},
+            "errors": []
+        }
 
         # Step 1: Download data if requested
-        if download:
+        if download and not json_output:
             self._print_section_header("DOWNLOADING STOCK DATA")
             results = self.downloader.download_multiple_stocks(tickers, None, None, period)
             if not results:
@@ -431,7 +629,8 @@ class AdvancedStockAnalysis:
 
         # Step 2: Load data
         stock_data_dict = {}
-        self._print_section_header("LOADING DATA")
+        if not json_output:
+            self._print_section_header("LOADING DATA")
         for ticker in tickers:
             files = self.visualizer.find_stock_files(ticker)
             if files:
@@ -439,50 +638,85 @@ class AdvancedStockAnalysis:
                 data = self.visualizer.load_stock_data(latest_file)
                 if data is not None:
                     stock_data_dict[ticker] = data
-                    print(f"  ✓ {ticker}: {len(data)} records loaded")
+                    result["data"][ticker] = {
+                        "records": len(data),
+                        "date_range": {
+                            "start": str(data.index.min()) if not data.empty else None,
+                            "end": str(data.index.max()) if not data.empty else None
+                        }
+                    }
+                    if not json_output:
+                        print(f"  ✓ {ticker}: {len(data)} records loaded")
                 else:
-                    print(f"  ❌ {ticker}: Failed to load data")
+                    error_msg = f"Failed to load data for {ticker}"
+                    result["errors"].append(error_msg)
+                    if not json_output:
+                        print(f"  ❌ {ticker}: {error_msg}")
             else:
-                print(f"  ❌ {ticker}: No data files found")
+                error_msg = f"No data files found for {ticker}"
+                result["errors"].append(error_msg)
+                if not json_output:
+                    print(f"  ❌ {ticker}: {error_msg}")
 
         if not stock_data_dict:
-            self._print_error("No valid data loaded. Exiting.")
-            return
+            error_msg = "No valid data loaded. Exiting."
+            if json_output:
+                result["errors"].append(error_msg)
+                return result
+            else:
+                self._print_error(error_msg)
+                return
 
         # Step 3: Seasonal Analysis
-        self._print_section_header("ANALYZING SEASONAL PATTERNS")
         seasonal_results = {}
+        if not json_output:
+            self._print_section_header("ANALYZING SEASONAL PATTERNS")
 
         for ticker in tickers:
             if ticker in stock_data_dict:
-                self._print_subsection(f"Analyzing {ticker}")
+                if not json_output:
+                    self._print_subsection(f"Analyzing {ticker}")
                 seasonal_result = self.seasonal_analyzer.analyze(stock_data_dict[ticker])
                 if seasonal_result:
                     seasonal_results[ticker] = seasonal_result
-
-                    # Display results
-                    print(f"    🌟 Seasonal Bias Score: {seasonal_result.bias_score:.2f}")
-                    print(f"    📈 Best Months: {', '.join(seasonal_result.best_months)}")
-                    print(f"    📉 Worst Months: {', '.join(seasonal_result.worst_months)}")
-                    print(f"    💡 Pattern: {seasonal_result.seasonal_summary}")
-                    print(f"    🎯 Recommendation: {seasonal_result.recommendation}")
+                    if not json_output:
+                        # Display results
+                        print(f"    🌟 Seasonal Bias Score: {seasonal_result.bias_score:.2f}")
+                        print(f"    📈 Best Months: {', '.join(seasonal_result.best_months)}")
+                        print(f"    📉 Worst Months: {', '.join(seasonal_result.worst_months)}")
+                        print(f"    💡 Pattern: {seasonal_result.seasonal_summary}")
+                        print(f"    🎯 Recommendation: {seasonal_result.recommendation}")
                 else:
-                    self._print_warning("Insufficient data for seasonal analysis (need >1 year)")
+                    error_msg = "Insufficient data for seasonal analysis (need >1 year)"
+                    result["errors"].append(f"{ticker}: {error_msg}")
+                    if not json_output:
+                        self._print_warning(error_msg)
+
+        result["analyses"]["seasonal"] = seasonal_results
 
         if not seasonal_results:
-            self._print_error("No seasonal patterns detected. Need more historical data.")
-            return
+            error_msg = "No seasonal patterns detected. Need more historical data."
+            if json_output:
+                result["errors"].append(error_msg)
+                return result
+            else:
+                self._print_error(error_msg)
+                return
 
         # Step 4: Generate Detailed Seasonal Report
-        self._print_section_header("DETAILED SEASONAL REPORT")
+        if not json_output:
+            self._print_section_header("DETAILED SEASONAL REPORT")
 
-        current_month = calendar.month_name[datetime.now().month]
-        print(f"📅 Current Month: {current_month}")
+            current_month = calendar.month_name[datetime.now().month]
+            print(f"📅 Current Month: {current_month}")
 
-        for ticker, seasonal_data in seasonal_results.items():
-            print(f"\n🎯 {ticker} SEASONAL ANALYSIS:")
-            print(f"   Bias Score: {seasonal_data.bias_score:.2f} "
-                  f"({'Strong' if seasonal_data.bias_score > 0.5 else 'Moderate' if seasonal_data.bias_score > 0.2 else 'Weak'} seasonality)")
+            for ticker, seasonal_data in seasonal_results.items():
+                print(f"\n🎯 {ticker} SEASONAL ANALYSIS:")
+                print(f"   Bias Score: {seasonal_data.bias_score:.2f} "
+                      f"({'Strong' if seasonal_data.bias_score > 0.5 else 'Moderate' if seasonal_data.bias_score > 0.2 else 'Weak'} seasonality)")
+
+        if json_output:
+            return result
 
             # Monthly breakdown
             print(f"   📈 Top 3 Months:")
@@ -1177,32 +1411,59 @@ class StockAnalysis(AdvancedStockAnalysis):
         print(f"📁 Data files: {self.downloader.data_dir}/")
         print(f"📊 Charts: {self.visualizer.output_dir}/")
 
-    def show_stock_info(self, tickers):
+    def show_stock_info(self, tickers, json_output=False):
         """Display information about stocks."""
-        self._print_header("STOCK INFORMATION")
+        result = {"command": "info", "tickers": tickers, "info": {}}
+
         for ticker in tickers:
             info = self.downloader.get_stock_info(ticker)
             if info:
-                print(f"\n{ticker.upper()} - {info['longName']}")
-                print(f"  Sector: {info['sector']}")
-                print(f"  Industry: {info['industry']}")
-                print(f"  Market Cap: {info['marketCap']}")
-                print(f"  Currency: {info['currency']}")
+                result["info"][ticker.upper()] = info
             else:
-                self._print_error(f"Unable to fetch information for {ticker.upper()}")
+                result["info"][ticker.upper()] = None
 
-    def list_available_data(self):
-        """List all available data files."""
-        self._print_header("AVAILABLE DATA FILES")
-        files = self.visualizer.find_stock_files()
-        if files:
-            for file in sorted(files):
-                ticker = self.visualizer.extract_ticker_from_filename(file)
-                file_size = os.path.getsize(file) / 1024  # KB
-                mod_time = datetime.fromtimestamp(os.path.getmtime(file))
-                print(f"  {ticker.upper()}: {os.path.basename(file)} ({file_size:.1f} KB, {mod_time.strftime('%Y-%m-%d %H:%M')})")
+        if json_output:
+            return result
         else:
-            self._print_warning("No data files found.")
+            self._print_header("STOCK INFORMATION")
+            for ticker in tickers:
+                info = result["info"][ticker.upper()]
+                if info:
+                    print(f"\n{ticker.upper()} - {info['longName']}")
+                    print(f"  Sector: {info['sector']}")
+                    print(f"  Industry: {info['industry']}")
+                    print(f"  Market Cap: {info['marketCap']}")
+                    print(f"  Currency: {info['currency']}")
+                else:
+                    self._print_error(f"Unable to fetch information for {ticker.upper()}")
+
+    def list_available_data(self, json_output=False):
+        """List all available data files."""
+        files = self.visualizer.find_stock_files()
+        if json_output:
+            result = []
+            if files:
+                for file in sorted(files):
+                    ticker = self.visualizer.extract_ticker_from_filename(file)
+                    file_size = os.path.getsize(file) / 1024  # KB
+                    mod_time = datetime.fromtimestamp(os.path.getmtime(file))
+                    result.append({
+                        "ticker": ticker.upper(),
+                        "filename": os.path.basename(file),
+                        "size_kb": round(file_size, 1),
+                        "modified": mod_time.strftime('%Y-%m-%d %H:%M')
+                    })
+            return result
+        else:
+            self._print_header("AVAILABLE DATA FILES")
+            if files:
+                for file in sorted(files):
+                    ticker = self.visualizer.extract_ticker_from_filename(file)
+                    file_size = os.path.getsize(file) / 1024  # KB
+                    mod_time = datetime.fromtimestamp(os.path.getmtime(file))
+                    print(f"  {ticker.upper()}: {os.path.basename(file)} ({file_size:.1f} KB, {mod_time.strftime('%Y-%m-%d %H:%M')})")
+            else:
+                self._print_warning("No data files found.")
 
 
 def main():
@@ -1315,6 +1576,9 @@ def main():
 �💡 TIP: Use quotes for tickers with spaces: "SAAB B"
         """
     )
+
+    # Global --json flag
+    parser.add_argument('--json', action='store_true', help='Output results in JSON format only')
 
     subparsers = parser.add_subparsers(dest='command', help='Analysis Commands')
 
@@ -1619,7 +1883,7 @@ def main():
                     except ImportError:
                         print("❌ ClariFiEngine not available. Running legacy analysis instead.")
                         # Fallback to legacy analysis
-                        analysis.comprehensive_analysis(
+                        result = analysis.comprehensive_analysis(
                             args.tickers,
                             args.period,
                             download=not args.no_download,
@@ -1630,8 +1894,12 @@ def main():
                             include_investment_advice=not args.no_investment_advice,
                             include_seasonal=not args.no_seasonal,
                             include_deep=args.include_deep,
-                            deep_chunk_months=args.deep_chunk_months
+                            deep_chunk_months=args.deep_chunk_months,
+                            json_output=getattr(args, 'json', False)
                         )
+                        if getattr(args, 'json', False):
+                            import json
+                            print(json.dumps(result, indent=2))
                         return
 
                 engine = ClariFiEngine()
@@ -1751,15 +2019,19 @@ def main():
                     else:
                         print("└─────────┴──────────────┴────────────┴─────────────┘")
 
-                    if not args.summary_only:
+                    if not args.summary_only and not getattr(args, 'json', False):
                         import json
                         print("\n🔍 Raw JSON data:")
                         print(json.dumps(result, indent=2))
                 else:
                     print(f"❌ Analysis failed: {result.get('error')}")
+
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
             else:
                 # Regular ticker analysis using legacy system
-                analysis.comprehensive_analysis(
+                result = analysis.comprehensive_analysis(
                     args.tickers,
                     args.period,
                     download=not args.no_download,
@@ -1770,15 +2042,23 @@ def main():
                     include_investment_advice=not args.no_investment_advice,
                     include_seasonal=not args.no_seasonal,
                     include_deep=args.include_deep,
-                    deep_chunk_months=args.deep_chunk_months
+                    deep_chunk_months=args.deep_chunk_months,
+                    json_output=getattr(args, 'json', False)
                 )
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
 
         elif args.command == 'seasonal':
-            analysis.seasonal_only(
+            result = analysis.seasonal_only(
                 args.tickers,
                 period=args.period,
-                download=not args.no_download
+                download=not args.no_download,
+                json_output=getattr(args, 'json', False)
             )
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'patterns':
             # Load data
@@ -1794,17 +2074,29 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                analysis._print_header("PATTERN ANALYSIS", "🔍")
-                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header("PATTERN ANALYSIS", "🔍")
+                    print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 correlation_results = analysis.pattern_analyzer.analyze_correlation_patterns(
                     stock_data_dict, window=args.window)
                 trend_results = analysis.pattern_analyzer.analyze_trend_strength(stock_data_dict)
 
-                # Create visualizations
-                analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
-                analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
+                result = {
+                    "command": "patterns",
+                    "tickers": list(stock_data_dict.keys()),
+                    "window": args.window,
+                    "correlation_results": correlation_results,
+                    "trend_results": trend_results
+                }
 
-                analysis._print_success("Pattern analysis completed!")
+                if not getattr(args, 'json', False):
+                    # Create visualizations
+                    analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
+                    analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
+                    analysis._print_success("Pattern analysis completed!")
+                else:
+                    import json
+                    print(json.dumps(result, indent=2))
 
         elif args.command == 'correlations':
             if len(args.tickers) < 2:
@@ -1824,16 +2116,27 @@ def main():
                     stock_data_dict[ticker] = data
 
             if len(stock_data_dict) >= 2:
-                analysis._print_header("CORRELATION ANALYSIS", "📊")
-                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header("CORRELATION ANALYSIS", "📊")
+                    print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 correlation_results = analysis.pattern_analyzer.analyze_correlation_patterns(
                     stock_data_dict, window=args.window)
 
-                # Create visualizations
-                analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
-                analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
+                result = {
+                    "command": "correlations",
+                    "tickers": list(stock_data_dict.keys()),
+                    "window": args.window,
+                    "correlation_results": correlation_results
+                }
 
-                analysis._print_success("Correlation analysis completed!")
+                if not getattr(args, 'json', False):
+                    # Create visualizations
+                    analysis.advanced_visualizer.plot_correlation_heatmap(correlation_results)
+                    analysis.advanced_visualizer.plot_rolling_correlations(correlation_results)
+                    analysis._print_success("Correlation analysis completed!")
+                else:
+                    import json
+                    print(json.dumps(result, indent=2))
 
         elif args.command == 'events':
             # Load data
@@ -1849,19 +2152,33 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                analysis._print_header("EVENT CORRELATION ANALYSIS", "📰")
-                print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header("EVENT CORRELATION ANALYSIS", "📰")
+                    print(f"📈 Tickers: {', '.join(stock_data_dict.keys())}")
                 event_results = analysis.event_correlator.correlate_events_with_movements(
                     stock_data_dict, args.lookback, args.lookahead)
                 unusual_movements = analysis.event_correlator.identify_unusual_movements(stock_data_dict)
 
-                # Create visualizations
-                analysis.advanced_visualizer.plot_event_impact_analysis(event_results)
-
                 # Generate summary
                 event_summary = analysis.event_correlator.generate_event_summary(event_results, unusual_movements)
 
-                analysis._print_success("Event correlation analysis completed!")
+                result = {
+                    "command": "events",
+                    "tickers": list(stock_data_dict.keys()),
+                    "lookback": args.lookback,
+                    "lookahead": args.lookahead,
+                    "event_results": event_results,
+                    "unusual_movements": unusual_movements,
+                    "event_summary": event_summary
+                }
+
+                if not getattr(args, 'json', False):
+                    # Create visualizations
+                    analysis.advanced_visualizer.plot_event_impact_analysis(event_results)
+                    analysis._print_success("Event correlation analysis completed!")
+                else:
+                    import json
+                    print(json.dumps(result, indent=2))
 
         elif args.command == 'volatility':
             # Load data
@@ -1877,14 +2194,26 @@ def main():
                     stock_data_dict[ticker] = data
 
             if stock_data_dict:
-                analysis._print_header("VOLATILITY ANALYSIS", "🌊")
+                if not getattr(args, 'json', False):
+                    analysis._print_header("VOLATILITY ANALYSIS", "🌊")
                 volatility_results = analysis.pattern_analyzer.detect_volatility_patterns(
                     stock_data_dict, window=args.window)
 
-                if args.clustering:
-                    analysis.advanced_visualizer.plot_volatility_clustering(volatility_results)
+                result = {
+                    "command": "volatility",
+                    "tickers": list(stock_data_dict.keys()),
+                    "window": args.window,
+                    "clustering": args.clustering,
+                    "volatility_results": volatility_results
+                }
 
-                analysis._print_success("Volatility analysis completed!")
+                if not getattr(args, 'json', False):
+                    if args.clustering:
+                        analysis.advanced_visualizer.plot_volatility_clustering(volatility_results)
+                    analysis._print_success("Volatility analysis completed!")
+                else:
+                    import json
+                    print(json.dumps(result, indent=2))
 
         elif args.command == 'download':
             downloader = StockDownloader()
@@ -1895,10 +2224,23 @@ def main():
                 end = args.end or datetime.now().strftime("%Y-%m-%d")
                 results = downloader.download_multiple_stocks(args.tickers, start, end)
 
-            analysis._print_header("DOWNLOAD COMPLETED", "📥")
-            for ticker, filepath in results.items():
-                if filepath:
-                    print(f"  ✅ {ticker}: {filepath}")
+            result = {
+                "command": "download",
+                "tickers": args.tickers,
+                "period": args.period,
+                "start": args.start,
+                "end": args.end,
+                "results": results
+            }
+
+            if not getattr(args, 'json', False):
+                analysis._print_header("DOWNLOAD COMPLETED", "📥")
+                for ticker, filepath in results.items():
+                    if filepath:
+                        print(f"  ✅ {ticker}: {filepath}")
+            else:
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'visualize':
             visualizer = StockVisualizer()
@@ -1924,10 +2266,16 @@ def main():
                 visualizer.create_correlation_matrix(args.tickers, save=not args.show, show=args.show)
 
         elif args.command == 'info':
-            legacy_analysis.show_stock_info(args.tickers)
+            result = legacy_analysis.show_stock_info(args.tickers, json_output=getattr(args, 'json', False))
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'list':
-            legacy_analysis.list_available_data()
+            result = legacy_analysis.list_available_data(json_output=getattr(args, 'json', False))
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'live':
             # Initialize live monitor
@@ -1950,18 +2298,23 @@ def main():
             # Initialize stock screener
             screener = StockScreener()
 
-            analysis._print_header(f"MARKET SCREENING: {args.category.upper()}", "🔍")
-            print(f"📊 Limit: {args.limit} results")
-            if args.export:
-                print(f"📁 Export to: {args.export}")
-            print()
+            if not getattr(args, 'json', False):
+                analysis._print_header(f"MARKET SCREENING: {args.category.upper()}", "🔍")
+                print(f"📊 Limit: {args.limit} results")
+                if args.export:
+                    print(f"📁 Export to: {args.export}")
+                print()
 
             # Perform screening
-            screener.screen_market(args.category, args.limit)
+            result = screener.screen_market(args.category, args.limit, json_output=getattr(args, 'json', False))
 
-            # TODO: Implement CSV export if requested
-            if args.export:
-                print(f"💾 CSV export functionality coming soon...")
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
+            else:
+                # TODO: Implement CSV export if requested
+                if args.export:
+                    print(f"💾 CSV export functionality coming soon...")
 
         elif args.command == 'portfolio':
 
@@ -2498,32 +2851,40 @@ def main():
             analyzer = AIAnalyzer(model=model_name)
 
             # Determine analysis mode
-            if args.combined:
-                analysis._print_header(f"COMBINED ANALYSIS (COMPREHENSIVE + AI) FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
-                print("📊 This includes patterns, options, seasonal, and quantitative analysis...")
-            else:
-                analysis._print_header(f"AI QUANTITATIVE ANALYSIS FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
+            if not getattr(args, 'json', False):
+                if args.combined:
+                    analysis._print_header(f"COMBINED ANALYSIS (COMPREHENSIVE + AI) FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
+                    print("📊 This includes patterns, options, seasonal, and quantitative analysis...")
+                else:
+                    analysis._print_header(f"AI QUANTITATIVE ANALYSIS FOR: {', '.join(tickers)} (PERIOD {period})", "🤖")
 
-            if not call_llm:
-                print("🧪 LLM call disabled (--no-llm)")
+                if not call_llm:
+                    print("🧪 LLM call disabled (--no-llm)")
 
             result = analyzer.analyze(tickers, period=period, call_model=call_llm, include_comprehensive=args.combined)
 
             analyses = result.get('analyses', [])
             if not analyses:
-                analysis._print_error("No analyses produced")
-                if result.get('errors'):
-                    print("Errors:")
-                    for k, v in result['errors'].items():
-                        print(f"  {k}: {v}")
+                if not getattr(args, 'json', False):
+                    analysis._print_error("No analyses produced")
+                    if result.get('errors'):
+                        print("Errors:")
+                        for k, v in result['errors'].items():
+                            print(f"  {k}: {v}")
                 return
 
             # Optional prompt transparency
-            if args.show_prompt:
+            if not getattr(args, 'json', False) and args.show_prompt:
                 print("\n📝 Prompt sent to LLM (quantitative basis):\n")
                 print(result.get('prompt', ''))
 
             # Optional raw JSON output
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
+                return
+
+            # Optional raw JSON output (legacy flag for backward compatibility)
             if args.raw_json:
                 print("\n🔧 Raw AI Response Debug Information:")
                 print("=" * 50)
@@ -2546,22 +2907,23 @@ def main():
 
             import math
             # Summary table
-            analysis._print_header("QUANTITATIVE METRICS (PER TICKER)", "📊")
-            header = (
-                "Ticker  Last  AvgDaily%  AnnVol%  MaxDD%  SMA50/200%  RSI14  BT_Str%  BT_Excess%  Trend"
-            )
-            print(header)
-            print("-" * len(header))
-            for a in analyses:
-                bt = a.get('backtest') or {}
-                print(
-                    f"{a['ticker']:<6} {a['last_price']:<5.2f} {a['avg_daily_return_pct']:<9.2f} {a['vol_annualized_pct']:<7.2f} {a['max_drawdown_pct']:<7.2f} "
-                    f"{(a['sma50_vs_200_pct'] if a['sma50_vs_200_pct'] is not None else float('nan')):<11.2f} {a['rsi_14']:<6.1f} "
-                    f"{bt.get('strategy_return_pct', float('nan')):<8.2f} {bt.get('excess_return_pct', float('nan')):<11.2f} {a['quantitative_trend']}"
+            if not getattr(args, 'json', False):
+                analysis._print_header("QUANTITATIVE METRICS (PER TICKER)", "📊")
+                header = (
+                    "Ticker  Last  AvgDaily%  AnnVol%  MaxDD%  SMA50/200%  RSI14  BT_Str%  BT_Excess%  Trend"
                 )
+                print(header)
+                print("-" * len(header))
+                for a in analyses:
+                    bt = a.get('backtest') or {}
+                    print(
+                        f"{a['ticker']:<6} {a['last_price']:<5.2f} {a['avg_daily_return_pct']:<9.2f} {a['vol_annualized_pct']:<7.2f} {a['max_drawdown_pct']:<7.2f} "
+                        f"{(a['sma50_vs_200_pct'] if a['sma50_vs_200_pct'] is not None else float('nan')):<11.2f} {a['rsi_14']:<6.1f} "
+                        f"{bt.get('strategy_return_pct', float('nan')):<8.2f} {bt.get('excess_return_pct', float('nan')):<11.2f} {a['quantitative_trend']}"
+                    )
 
             # Display comprehensive analysis results if available
-            if args.combined and result.get('comprehensive_recommendations'):
+            if not getattr(args, 'json', False) and args.combined and result.get('comprehensive_recommendations'):
                 analysis._print_header("COMPREHENSIVE ANALYSIS RECOMMENDATIONS", "📋")
                 comp_recs = result.get('comprehensive_recommendations', {})
                 for ticker, rec in comp_recs.items():
@@ -2570,7 +2932,7 @@ def main():
             llm_parsed = (result.get('llm') or {}).get('parsed')
             combined_recs = result.get('combined_recommendations')
 
-            if call_llm and (llm_parsed or combined_recs):
+            if not getattr(args, 'json', False) and call_llm and (llm_parsed or combined_recs):
                 # Display combined recommendations if available, otherwise standard AI recommendations
                 if args.combined and combined_recs:
                     analysis._print_header("COMBINED AI + COMPREHENSIVE RECOMMENDATIONS", "🎯")
@@ -2625,7 +2987,7 @@ def main():
                                 for r in rationale[:5]:
                                     print(" -", r)
 
-            if result.get('errors'):
+            if not getattr(args, 'json', False) and result.get('errors'):
                 analysis._print_warning("Non-fatal errors:")
                 for k, v in result['errors'].items():
                     print(f"  {k}: {v}")
@@ -2649,18 +3011,19 @@ def main():
                 tickers = args.tickers if args.tickers else None
                 topics = args.topics if hasattr(args, 'topics') and args.topics else None
 
-                analysis._print_header("ALPHA VANTAGE NEWS SENTIMENT ANALYSIS", "📰")
-                if tickers:
-                    print(f"📊 Tickers: {', '.join(tickers)}")
-                if topics:
-                    print(f"🗂️ Topics: {', '.join(topics)}")
-                if args.time_from:
-                    print(f"📅 From: {args.time_from}")
-                if args.time_to:
-                    print(f"📅 To: {args.time_to}")
-                print(f"🔢 Limit: {args.limit}")
-                print(f"📈 Sort: {args.sort}")
-                print()
+                if not getattr(args, 'json', False):
+                    analysis._print_header("ALPHA VANTAGE NEWS SENTIMENT ANALYSIS", "📰")
+                    if tickers:
+                        print(f"📊 Tickers: {', '.join(tickers)}")
+                    if topics:
+                        print(f"🗂️ Topics: {', '.join(topics)}")
+                    if args.time_from:
+                        print(f"📅 From: {args.time_from}")
+                    if args.time_to:
+                        print(f"📅 To: {args.time_to}")
+                    print(f"🔢 Limit: {args.limit}")
+                    print(f"📈 Sort: {args.sort}")
+                    print()
 
                 try:
                     news_data = av_analyzer.get_news_sentiment(
@@ -2671,6 +3034,22 @@ def main():
                         sort=args.sort,
                         limit=args.limit
                     )
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "news-sentiment",
+                            "tickers": tickers,
+                            "topics": topics,
+                            "time_from": args.time_from,
+                            "time_to": args.time_to,
+                            "limit": args.limit,
+                            "sort": args.sort,
+                            "data": news_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     # Display results
                     metadata = news_data.get('metadata', {})
@@ -2756,14 +3135,41 @@ def main():
                     analysis._print_success("News sentiment analysis completed!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch news sentiment: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "news-sentiment",
+                            "tickers": tickers,
+                            "topics": topics,
+                            "time_from": args.time_from,
+                            "time_to": args.time_to,
+                            "limit": args.limit,
+                            "sort": args.sort,
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch news sentiment: {str(e)}")
 
             elif args.av_command == 'overview':
                 # Handle company overview
-                analysis._print_header(f"ALPHA VANTAGE COMPANY OVERVIEW: {args.symbol.upper()}", "📊")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE COMPANY OVERVIEW: {args.symbol.upper()}", "📊")
 
                 try:
                     overview_data = av_analyzer.get_company_overview(args.symbol)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "overview",
+                            "symbol": args.symbol,
+                            "data": overview_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     analysis._print_section_header("COMPANY INFORMATION", "🏢")
                     print(f"🏷️ Symbol: {overview_data.get('symbol', 'N/A')}")
@@ -2793,14 +3199,36 @@ def main():
                     analysis._print_success("Company overview retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch company overview: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "overview",
+                            "symbol": args.symbol,
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch company overview: {str(e)}")
 
             elif args.av_command == 'quote':
                 # Handle global quote
-                analysis._print_header(f"ALPHA VANTAGE GLOBAL QUOTE: {args.symbol.upper()}", "💰")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE GLOBAL QUOTE: {args.symbol.upper()}", "💰")
 
                 try:
                     quote_data = av_analyzer.get_global_quote(args.symbol)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "quote",
+                            "symbol": args.symbol,
+                            "data": quote_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     analysis._print_section_header("QUOTE INFORMATION", "💹")
                     print(f"🏷️ Symbol: {quote_data.get('symbol', 'N/A')}")
@@ -2828,16 +3256,39 @@ def main():
                     analysis._print_success("Quote data retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch quote: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "quote",
+                            "symbol": args.symbol,
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch quote: {str(e)}")
 
             elif args.av_command == 'income-statement':
                 # Handle income statement
                 annual = not getattr(args, 'quarterly', False)
-                analysis._print_header(f"ALPHA VANTAGE INCOME STATEMENT: {args.symbol.upper()}", "💼")
-                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE INCOME STATEMENT: {args.symbol.upper()}", "💼")
+                    print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
 
                 try:
                     income_data = av_analyzer.get_income_statement(args.symbol, annual=annual)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "income-statement",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "data": income_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     # This would display the income statement data
                     # For brevity, showing basic structure
@@ -2848,16 +3299,40 @@ def main():
                     analysis._print_success("Income statement retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch income statement: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "income-statement",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch income statement: {str(e)}")
 
             elif args.av_command == 'balance-sheet':
                 # Handle balance sheet
                 annual = not getattr(args, 'quarterly', False)
-                analysis._print_header(f"ALPHA VANTAGE BALANCE SHEET: {args.symbol.upper()}", "🏦")
-                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE BALANCE SHEET: {args.symbol.upper()}", "🏦")
+                    print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
 
                 try:
                     balance_data = av_analyzer.get_balance_sheet(args.symbol, annual=annual)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "balance-sheet",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "data": balance_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     analysis._print_section_header("BALANCE SHEET DATA", "📋")
                     print("💡 Balance sheet data retrieved successfully!")
@@ -2866,16 +3341,40 @@ def main():
                     analysis._print_success("Balance sheet retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch balance sheet: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "balance-sheet",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch balance sheet: {str(e)}")
 
             elif args.av_command == 'cash-flow':
                 # Handle cash flow
                 annual = not getattr(args, 'quarterly', False)
-                analysis._print_header(f"ALPHA VANTAGE CASH FLOW: {args.symbol.upper()}", "💵")
-                print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE CASH FLOW: {args.symbol.upper()}", "💵")
+                    print(f"📊 Period: {'Annual' if annual else 'Quarterly'}")
 
                 try:
                     cashflow_data = av_analyzer.get_cash_flow(args.symbol, annual=annual)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "cash-flow",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "data": cashflow_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     analysis._print_section_header("CASH FLOW DATA", "📋")
                     print("💡 Cash flow data retrieved successfully!")
@@ -2884,14 +3383,37 @@ def main():
                     analysis._print_success("Cash flow statement retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch cash flow: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "cash-flow",
+                            "symbol": args.symbol,
+                            "period": "annual" if annual else "quarterly",
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch cash flow: {str(e)}")
 
             elif args.av_command == 'earnings':
                 # Handle earnings
-                analysis._print_header(f"ALPHA VANTAGE EARNINGS: {args.symbol.upper()}", "📈")
+                if not getattr(args, 'json', False):
+                    analysis._print_header(f"ALPHA VANTAGE EARNINGS: {args.symbol.upper()}", "📈")
 
                 try:
                     earnings_data = av_analyzer.get_earnings(args.symbol)
+
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "earnings",
+                            "symbol": args.symbol,
+                            "data": earnings_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
 
                     analysis._print_section_header("EARNINGS DATA", "📋")
                     print("💡 Earnings data retrieved successfully!")
@@ -2900,71 +3422,97 @@ def main():
                     analysis._print_success("Earnings data retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch earnings: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "earnings",
+                            "symbol": args.symbol,
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch earnings: {str(e)}")
 
             elif args.av_command == 'top-gainers-losers':
                 # Handle top gainers and losers
-                analysis._print_header("ALPHA VANTAGE TOP GAINERS, LOSERS & MOST ACTIVE", "📊")
+                if not getattr(args, 'json', False):
+                    analysis._print_header("ALPHA VANTAGE TOP GAINERS, LOSERS & MOST ACTIVE", "📊")
 
                 try:
                     gainers_losers_data = av_analyzer.get_top_gainers_losers()
 
-                    analysis._print_section_header("TOP GAINERS", "📈")
-                    if args.format == 'table':
-                        if gainers_losers_data['top_gainers']:
-                            print("🏆 Top 20 Gainers:")
-                            print("-" * 80)
-                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
-                            print("-" * 80)
-                            for gainer in gainers_losers_data['top_gainers'][:20]:
-                                symbol = gainer.get('ticker', 'N/A')
-                                price = gainer.get('price', 'N/A')
-                                change = gainer.get('change_amount', 'N/A')
-                                change_pct = gainer.get('change_percentage', 'N/A')
-                                volume = gainer.get('volume', 'N/A')
-                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
-                        else:
-                            print("No gainers data available")
-
-                        analysis._print_section_header("TOP LOSERS", "📉")
-                        if gainers_losers_data['top_losers']:
-                            print("💔 Top 20 Losers:")
-                            print("-" * 80)
-                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
-                            print("-" * 80)
-                            for loser in gainers_losers_data['top_losers'][:20]:
-                                symbol = loser.get('ticker', 'N/A')
-                                price = loser.get('price', 'N/A')
-                                change = loser.get('change_amount', 'N/A')
-                                change_pct = loser.get('change_percentage', 'N/A')
-                                volume = loser.get('volume', 'N/A')
-                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
-                        else:
-                            print("No losers data available")
-
-                        analysis._print_section_header("MOST ACTIVELY TRADED", "🔥")
-                        if gainers_losers_data['most_actively_traded']:
-                            print("🚀 Most Active:")
-                            print("-" * 80)
-                            print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
-                            print("-" * 80)
-                            for active in gainers_losers_data['most_actively_traded'][:20]:
-                                symbol = active.get('ticker', 'N/A')
-                                price = active.get('price', 'N/A')
-                                change = active.get('change_amount', 'N/A')
-                                change_pct = active.get('change_percentage', 'N/A')
-                                volume = active.get('volume', 'N/A')
-                                print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
-                        else:
-                            print("No most active data available")
-                    else:  # JSON format
+                    if getattr(args, 'json', False):
                         import json
-                        print(json.dumps(gainers_losers_data, indent=2))
+                        result = {
+                            "command": "av",
+                            "subcommand": "top-gainers-losers",
+                            "data": gainers_losers_data
+                        }
+                        print(json.dumps(result, indent=2))
+                        return
+
+                    analysis._print_section_header("TOP GAINERS", "📈")
+                    if gainers_losers_data['top_gainers']:
+                        print("🏆 Top 20 Gainers:")
+                        print("-" * 80)
+                        print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                        print("-" * 80)
+                        for gainer in gainers_losers_data['top_gainers'][:20]:
+                            symbol = gainer.get('ticker', 'N/A')
+                            price = gainer.get('price', 'N/A')
+                            change = gainer.get('change_amount', 'N/A')
+                            change_pct = gainer.get('change_percentage', 'N/A')
+                            volume = gainer.get('volume', 'N/A')
+                            print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                    else:
+                        print("No gainers data available")
+
+                    analysis._print_section_header("TOP LOSERS", "📉")
+                    if gainers_losers_data['top_losers']:
+                        print("💔 Top 20 Losers:")
+                        print("-" * 80)
+                        print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                        print("-" * 80)
+                        for loser in gainers_losers_data['top_losers'][:20]:
+                            symbol = loser.get('ticker', 'N/A')
+                            price = loser.get('price', 'N/A')
+                            change = loser.get('change_amount', 'N/A')
+                            change_pct = loser.get('change_percentage', 'N/A')
+                            volume = loser.get('volume', 'N/A')
+                            print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                    else:
+                        print("No losers data available")
+
+                    analysis._print_section_header("MOST ACTIVELY TRADED", "🔥")
+                    if gainers_losers_data['most_actively_traded']:
+                        print("🚀 Most Active:")
+                        print("-" * 80)
+                        print(f"{'Symbol':<10} {'Price':<10} {'Change':<12} {'Change %':<12} {'Volume':<15}")
+                        print("-" * 80)
+                        for active in gainers_losers_data['most_actively_traded'][:20]:
+                            symbol = active.get('ticker', 'N/A')
+                            price = active.get('price', 'N/A')
+                            change = active.get('change_amount', 'N/A')
+                            change_pct = active.get('change_percentage', 'N/A')
+                            volume = active.get('volume', 'N/A')
+                            print(f"{symbol:<10} {price:<10} {change:<12} {change_pct:<12} {volume:<15}")
+                    else:
+                        print("No most active data available")
 
                     analysis._print_success("Top gainers, losers, and most active data retrieved successfully!")
 
                 except Exception as e:
-                    analysis._print_error(f"Failed to fetch top gainers/losers: {str(e)}")
+                    if getattr(args, 'json', False):
+                        import json
+                        result = {
+                            "command": "av",
+                            "subcommand": "top-gainers-losers",
+                            "errors": [str(e)]
+                        }
+                        print(json.dumps(result, indent=2))
+                    else:
+                        analysis._print_error(f"Failed to fetch top gainers/losers: {str(e)}")
 
             else:
                 av_parser.print_help()

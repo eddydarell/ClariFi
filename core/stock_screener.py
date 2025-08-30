@@ -288,45 +288,57 @@ class StockScreener:
 
         return "\n".join(output)
 
-    def screen_market(self, category: str, limit: int = 20) -> None:
+    def screen_market(self, category: str, limit: int = 20, json_output: bool = False) -> dict:
         """
         Main screening function
 
         Args:
             category: "gainers", "losers", "actives", or "new"
             limit: Number of results to return
+            json_output: Whether to return structured data instead of printing
         """
-        print(f"{Fore.CYAN}🔍 Screening market for {category}...{Style.RESET_ALL}")
-        print()
+        if not json_output:
+            print(f"{Fore.CYAN}🔍 Screening market for {category}...{Style.RESET_ALL}")
+            print()
 
         if category == "new":
             results = self.get_new_listings(limit=limit)
         else:
             results = self.get_market_movers(category=category, limit=limit)
 
-        formatted_output = self.format_screener_results(results, category)
-        print(formatted_output)
+        result = {
+            "command": "screen",
+            "category": category,
+            "limit": limit,
+            "results": results
+        }
 
-        # Additional insights
-        if results and category != "new":
-            print(f"{Fore.YELLOW}💡 Market Insights:{Style.RESET_ALL}")
-            if category == "gainers":
-                print("   • Consider these stocks for momentum trading")
-                print("   • Check news and earnings for catalyst identification")
-                print("   • Monitor volume to confirm strength")
-            elif category == "losers":
-                print("   • Potential value opportunities or falling knives")
-                print("   • Research fundamental reasons for decline")
-                print("   • Consider support levels before entry")
-            elif category == "actives":
-                print("   • High volume indicates significant interest")
-                print("   • Check for news, earnings, or technical breakouts")
-                print("   • Monitor for continued momentum")
-        elif results and category == "new":
-            print(f"{Fore.YELLOW}💡 New Listings Insights:{Style.RESET_ALL}")
-            print("   • Recently public companies may have high volatility")
-            print("   • Research company fundamentals and business model")
-            print("   • Consider lock-up period expiration dates")
+        if not json_output:
+            formatted_output = self.format_screener_results(results, category)
+            print(formatted_output)
+
+            # Additional insights
+            if results and category != "new":
+                print(f"{Fore.YELLOW}💡 Market Insights:{Style.RESET_ALL}")
+                if category == "gainers":
+                    print("   • Consider these stocks for momentum trading")
+                    print("   • Check news and earnings for catalyst identification")
+                    print("   • Monitor volume to confirm strength")
+                elif category == "losers":
+                    print("   • Potential value opportunities or falling knives")
+                    print("   • Research fundamental reasons for decline")
+                    print("   • Consider support levels before entry")
+                elif category == "actives":
+                    print("   • High volume indicates significant interest")
+                    print("   • Check for news, earnings, or technical breakouts")
+                    print("   • Monitor for continued momentum")
+            elif results and category == "new":
+                print(f"{Fore.YELLOW}💡 New Listings Insights:{Style.RESET_ALL}")
+                print("   • Recently public companies may have high volatility")
+                print("   • Research company fundamentals and business model")
+                print("   • Consider lock-up period expiration dates")
+        else:
+            return result
 
         print()
         print(f"{Fore.GREEN}✅ Screening completed! Found {len(results)} {category}{Style.RESET_ALL}")
