@@ -12,6 +12,7 @@ import argparse
 import os
 import sys
 import calendar
+import numpy as np
 from datetime import datetime, timedelta
 
 # Add the current directory to path to import our modules
@@ -45,6 +46,87 @@ class AdvancedStockAnalysis:
         self.options_analyzer = OptionsAnalyzer()
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
+
+    def analyze_multi_timeframe(self, ticker, periods=['1mo', '3mo', '6mo', '1y']):
+        """
+        Analyze ticker across multiple timeframes for trend confirmation.
+
+        Args:
+            ticker (str): Stock ticker symbol
+            periods (list): List of period strings to analyze
+
+        Returns:
+            dict: Multi-timeframe analysis results with consensus
+        """
+        results = {}
+
+        for period in periods:
+            try:
+                data = self.downloader.download_stock_data(ticker, None, None, period)
+                if data is not None and len(data) > 50:
+                    # Calculate returns for this timeframe
+                    total_return = (data['Close'].iloc[-1] / data['Close'].iloc[0] - 1) * 100
+                    volatility = data['Close'].pct_change().std() * np.sqrt(252) * 100
+
+                    # Simple trend classification using moving averages
+                    sma20 = data['Close'].rolling(20).mean().iloc[-1]
+                    sma50 = data['Close'].rolling(50).mean().iloc[-1] if len(data) >= 50 else None
+                    current = data['Close'].iloc[-1]
+
+                    # Determine trend
+                    if sma50 is not None:
+                        if current > sma20 > sma50:
+                            trend = 'STRONG_BULLISH'
+                        elif current > sma20:
+                            trend = 'BULLISH'
+                        elif current < sma20 < sma50:
+                            trend = 'STRONG_BEARISH'
+                        elif current < sma20:
+                            trend = 'BEARISH'
+                        else:
+                            trend = 'NEUTRAL'
+                    else:
+                        trend = 'BULLISH' if current > sma20 else 'BEARISH'
+
+                    results[period] = {
+                        'return_pct': float(total_return),
+                        'volatility_pct': float(volatility),
+                        'trend': trend,
+                        'current_price': float(current),
+                        'sma20': float(sma20),
+                        'sma50': float(sma50) if sma50 is not None else None
+                    }
+            except Exception as e:
+                print(f"⚠️  Could not analyze {period} timeframe: {e}")
+                continue
+
+        if not results:
+            return {'error': 'No timeframes successfully analyzed'}
+
+        # Calculate consensus
+        bullish_count = sum(1 for r in results.values() if 'BULL' in r['trend'])
+        bearish_count = sum(1 for r in results.values() if 'BEAR' in r['trend'])
+        total_count = len(results)
+
+        if bullish_count >= total_count * 0.6:
+            consensus = 'BULLISH'
+            confidence = 'HIGH' if bullish_count >= total_count * 0.75 else 'MEDIUM'
+        elif bearish_count >= total_count * 0.6:
+            consensus = 'BEARISH'
+            confidence = 'HIGH' if bearish_count >= total_count * 0.75 else 'MEDIUM'
+        else:
+            consensus = 'NEUTRAL'
+            confidence = 'LOW'
+
+        return {
+            'ticker': ticker,
+            'timeframes': results,
+            'consensus': consensus,
+            'confidence': confidence,
+            'bullish_count': bullish_count,
+            'bearish_count': bearish_count,
+            'neutral_count': total_count - bullish_count - bearish_count
+        }
 
     def _print_header(self, title, emoji="🚀"):
         """Print a consistent header for all analysis types."""
@@ -299,10 +381,24 @@ class AdvancedStockAnalysis:
                         'Williams_%R': float(data['Williams_%R'].iloc[-1]) if 'Williams_%R' in data.columns and not data['Williams_%R'].isna().iloc[-1] else None,
                         'OBV': float(data['OBV'].iloc[-1]) if 'OBV' in data.columns and not data['OBV'].isna().iloc[-1] else None,
                         'Parabolic_SAR': float(data['Parabolic_SAR'].iloc[-1]) if 'Parabolic_SAR' in data.columns and not data['Parabolic_SAR'].isna().iloc[-1] else None,
+                        'RSI_14': float(data['RSI_14'].iloc[-1]) if 'RSI_14' in data.columns and not data['RSI_14'].isna().iloc[-1] else None,
+                        'RSI_30': float(data['RSI_30'].iloc[-1]) if 'RSI_30' in data.columns and not data['RSI_30'].isna().iloc[-1] else None,
+                        'MACD': float(data['MACD'].iloc[-1]) if 'MACD' in data.columns and not data['MACD'].isna().iloc[-1] else None,
+                        'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in data.columns and not data['MACD_Signal'].isna().iloc[-1] else None,
+                        'BB_Width': float(data['BB_Width'].iloc[-1]) if 'BB_Width' in data.columns and not data['BB_Width'].isna().iloc[-1] else None,
                         'current_price': float(data['Close'].iloc[-1])
                     }
-                except Exception:
-                    technical_results[ticker] = {}
+
+                    # Add risk metrics
+                    risk_metrics = self.pattern_analyzer.calculate_risk_metrics(data)
+                    technical_results[ticker]['risk_metrics'] = risk_metrics
+
+                    # Add market regime detection
+                    regime = self.pattern_analyzer.detect_market_regime(data)
+                    technical_results[ticker]['market_regime'] = regime
+
+                except Exception as e:
+                    technical_results[ticker] = {'error': str(e)}
 
             result["analyses"]["patterns"] = {
                 "correlation": self._convert_to_json_serializable(correlation_results) if json_output else correlation_results,
@@ -798,41 +894,57 @@ class AdvancedStockAnalysis:
         if technical_results:
             self._print_section_header("TECHNICAL INDICATORS SUMMARY")
             for ticker, ind in technical_results.items():
+                if 'error' in ind:
+                    print(f"  ⚠️  {ticker}: {ind['error']}")
+                    continue
+
+                print(f"\n  📈 {ticker}:")
+
+                # Basic indicators
+                rsi_14 = ind.get('RSI_14')
+                rsi_30 = ind.get('RSI_30')
                 adx = ind.get('ADX')
-                cci = ind.get('CCI')
-                willr = ind.get('Williams_%R')
-                sar = ind.get('Parabolic_SAR')
-                price = ind.get('current_price')
+                macd = ind.get('MACD')
+                macd_signal = ind.get('MACD_Signal')
+                bb_width = ind.get('BB_Width')
 
-                # Derive a simple composite signal
-                derived = 'Neutral'
-                try:
-                    if adx is not None and adx > 25 and cci is not None and cci > 100 and willr is not None and willr > -20:
-                        derived = 'Strong Bullish'
-                    elif adx is not None and adx > 25 and cci is not None and cci < -100 and willr is not None and willr < -80:
-                        derived = 'Strong Bearish'
-                    elif adx is not None and adx < 20:
-                        derived = 'No clear trend (Low ADX)'
-                    else:
-                        derived = 'Neutral/Wait'
-                except Exception:
-                    derived = 'Unknown'
+                if rsi_14:
+                    rsi_signal = "Overbought" if rsi_14 > 70 else "Oversold" if rsi_14 < 30 else "Neutral"
+                    print(f"     RSI(14): {rsi_14:.1f} ({rsi_signal})")
+                if rsi_30:
+                    print(f"     RSI(30): {rsi_30:.1f}")
+                if adx:
+                    trend_str = "Strong trend" if adx > 25 else "Weak/No trend" if adx < 20 else "Moderate trend"
+                    print(f"     ADX: {adx:.1f} ({trend_str})")
+                if macd and macd_signal:
+                    macd_cross = "Bullish" if macd > macd_signal else "Bearish"
+                    print(f"     MACD: {macd:.3f} vs Signal: {macd_signal:.3f} ({macd_cross})")
+                if bb_width:
+                    vol_regime = "High volatility" if bb_width > 5 else "Low volatility" if bb_width < 2 else "Normal"
+                    print(f"     BB Width: {bb_width:.2f}% ({vol_regime})")
 
-                sar_note = None
-                try:
-                    if sar is not None and price is not None:
-                        sar_note = 'SAR below price (uptrend)' if sar < price else 'SAR above price (downtrend)'
-                except Exception:
-                    sar_note = None
+                # Risk Metrics
+                risk = ind.get('risk_metrics', {})
+                if risk and 'error' not in risk:
+                    print(f"     Risk Metrics:")
+                    sharpe = risk.get('sharpe_ratio', 0)
+                    sortino = risk.get('sortino_ratio', 0)
+                    max_dd = risk.get('max_drawdown_pct', 0)
+                    print(f"       Sharpe Ratio: {sharpe:.2f}")
+                    print(f"       Sortino Ratio: {sortino:.2f}")
+                    print(f"       Max Drawdown: {max_dd:.2f}%")
+                    print(f"       Annual Volatility: {risk.get('annual_volatility_pct', 0):.2f}%")
 
-                line = f"  {ticker}: ADX={adx if adx is not None else 'N/A'} | CCI={cci if cci is not None else 'N/A'} | Williams%R={willr if willr is not None else 'N/A'} | {derived}"
-                if sar_note:
-                    line += f" | {sar_note}"
-                print(line)
+                # Market Regime
+                regime = ind.get('market_regime', {})
+                if regime and 'error' not in regime:
+                    regime_type = regime.get('regime', 'UNKNOWN')
+                    confidence = regime.get('confidence', 'LOW')
+                    recommendation = regime.get('recommendation', 'N/A')
 
-                # Add short tech insight for global insights later
-                if derived and derived.startswith('Strong'):
-                    tech_insights.append(f"{ticker}: {derived}")
+                    regime_emoji = "📊" if regime_type == 'TRENDING' else "↔️" if regime_type == 'RANGING' else "⚡" if regime_type == 'VOLATILE' else "❓"
+                    print(f"     {regime_emoji} Market Regime: {regime_type} (Confidence: {confidence})")
+                    print(f"       → {recommendation}")
 
         # Correlation Summary
         if correlation_results and correlation_results.get('pattern_summary'):
@@ -1474,49 +1586,60 @@ def main():
 🎯 ADVANCED MARKET ANALYSIS EXAMPLES:
 
 📊 QUICK ANALYSIS (Basic):
-  ./run.sh quick PLTR QBTS
-  ./run.sh quick AAPL MSFT --period 6mo
+  ./clarifi.sh quick PLTR QBTS
+  ./clarifi.sh quick AAPL MSFT --period 6mo
 
 🔬 COMPREHENSIVE ANALYSIS (Advanced):
-  ./run.sh analyze PLTR QBTS AAPL --period 1y
-  ./run.sh analyze "SAAB B" NANEXA --period 6mo --no-events
-  ./run.sh analyze <portfolio_id_or_name> --period 1y --include-deep
-  ./run.sh analyze MyPortfolio --period 6mo --summary-only
+  ./clarifi.sh analyze PLTR QBTS AAPL --period 1y
+  ./clarifi.sh analyze "SAAB B" NANEXA --period 6mo --no-events
+  ./clarifi.sh analyze <portfolio_id_or_name> --period 1y --include-deep
+  ./clarifi.sh analyze MyPortfolio --period 6mo --summary-only
+  ./clarifi.sh analyze AAPL --no-patterns --no-advanced-viz  # Minimal analysis
+  ./clarifi.sh analyze TSLA --no-seasonal --no-investment-advice
 
 🔁 DEEP BACKTESTING ANALYSIS:
-  ./run.sh analyze AAPL MSFT --period 5y --include-deep
-  ./run.sh analyze PLTR --period 3y --include-deep --deep-chunk-months 6
-  ./run.sh analyze <portfolio_id> --include-deep --deep-chunk-months 3
+  ./clarifi.sh analyze AAPL MSFT --period 5y --include-deep
+  ./clarifi.sh analyze PLTR --period 3y --include-deep --deep-chunk-months 6
+  ./clarifi.sh analyze <portfolio_id> --include-deep --deep-chunk-months 3
 
 📈 PATTERN ANALYSIS:
-  ./run.sh patterns AAPL MSFT GOOGL --period 2y
-  ./run.sh correlations PLTR QBTS --window 30
+  ./clarifi.sh patterns AAPL MSFT GOOGL --period 2y
+  ./clarifi.sh correlations PLTR QBTS --window 30
 
 📰 EVENT CORRELATION:
-  ./run.sh events PLTR QBTS --period 1y
-  ./run.sh events AAPL --lookback 7 --lookahead 7
+  ./clarifi.sh events PLTR QBTS --period 1y
+  ./clarifi.sh events AAPL --lookback 7 --lookahead 7
 
 🎨 ADVANCED VISUALIZATIONS:
-  ./run.sh visualize PLTR --support-resistance
-  ./run.sh volatility AAPL MSFT --clustering
+  ./clarifi.sh visualize PLTR --support-resistance
+  ./clarifi.sh volatility AAPL MSFT --clustering
 
 📋 DATA MANAGEMENT:
-  ./run.sh download PLTR QBTS --period 6mo
-  ./run.sh info PLTR QBTS "SAAB B"
-  ./run.sh list
+  ./clarifi.sh download PLTR QBTS --period 6mo
+  ./clarifi.sh info PLTR QBTS "SAAB B"
+  ./clarifi.sh list
 
 📡 LIVE MONITORING:
-  ./run.sh live AAPL MSFT TSLA
-  ./run.sh live PLTR QBTS --interval 10
-  ./run.sh live AAPL --no-graphs --interval 3
+  ./clarifi.sh live AAPL MSFT TSLA
+  ./clarifi.sh live PLTR QBTS --interval 10
+  ./clarifi.sh live AAPL --no-graphs --interval 3
 
 📊 MARKET SCREENING:
-  ./run.sh screen gainers
-  ./run.sh screen losers --limit 10
-  ./run.sh screen actives --limit 30
-  ./run.sh screen new
+  ./clarifi.sh screen gainers
+  ./clarifi.sh screen losers --limit 10
+  ./clarifi.sh screen actives --limit 30
+  ./clarifi.sh screen new
+
+🗓️ SEASONAL ANALYSIS:
+  ./clarifi.sh seasonal AAPL MSFT --period 5y
+  ./clarifi.sh seasonal PLTR --period 3y --no-download
 
 🎯 MARKET INTELLIGENCE FEATURES:
+  ✅ Automated data quality validation (price anomalies, gaps, inconsistencies)
+  ✅ Enhanced technical indicators (RSI 14/30, MACD with signal, BB width)
+  ✅ Advanced risk metrics (Sharpe, Sortino, Calmar, VaR, CVaR, Max Drawdown)
+  ✅ Market regime detection (Trending/Ranging/Volatile with confidence)
+  ✅ Multi-timeframe trend analysis (1mo, 3mo, 6mo, 1y consensus)
   ✅ Correlation pattern detection
   ✅ Leading indicator identification
   ✅ Volatility clustering analysis
@@ -1531,47 +1654,92 @@ def main():
   ✅ Deep backtesting & accuracy analysis
   ✅ Real-time live monitoring with terminal graphs
   ✅ Market screening for gainers, losers, and new listings
+  ✅ Seasonal pattern analysis with holiday effects
 
 ⚖️ OPTIONS & RISK ANALYSIS:
-  ./run.sh analyze AAPL MSFT --period 1y  # Full analysis with options
-  ./run.sh analyze PLTR --no-options      # Skip options analysis
+  ./clarifi.sh analyze AAPL MSFT --period 1y  # Full analysis with options
+  ./clarifi.sh analyze PLTR --no-options      # Skip options analysis
+
+📊 ENHANCED ANALYSIS FEATURES (NEW):
+  ✓ Automated Data Quality Validation
+    - Detects price anomalies (>50% single-day moves)
+    - Identifies missing data and suspicious gaps
+    - Validates volume consistency
+    - Checks for data integrity issues
+
+  ✓ Advanced Technical Indicators
+    - RSI (14 & 30 period) with overbought/oversold signals
+    - MACD with signal line and histogram crossovers
+    - Bollinger Bands with volatility regime classification
+    - Enhanced ADX for trend strength measurement
+
+  ✓ Comprehensive Risk Metrics
+    - Sharpe Ratio (risk-adjusted returns)
+    - Sortino Ratio (downside risk focus)
+    - Calmar Ratio (drawdown-adjusted returns)
+    - VaR & CVaR (95% confidence)
+    - Maximum Drawdown percentage
+    - Annual volatility and returns
+
+  ✓ Market Regime Detection
+    - TRENDING: Strong directional moves (use trend-following)
+    - RANGING: Sideways consolidation (use mean reversion)
+    - VOLATILE: High uncertainty (reduce position sizes)
+    - Confidence levels: HIGH/MEDIUM/LOW
+    - Strategy recommendations based on regime
+
+  ✓ Multi-Timeframe Analysis
+    - Analyzes 1mo, 3mo, 6mo, 1y trends
+    - Provides consensus: BULLISH/BEARISH/NEUTRAL
+    - Confidence scoring across timeframes
 
 💰 INVESTMENT SUGGESTIONS:
-  ./run.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
-  ./run.sh analyze PLTR --no-investment-advice  # Skip suggestions
+  ./clarifi.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
+  ./clarifi.sh analyze PLTR --no-investment-advice  # Skip suggestions
 
 🤖 AI-POWERED ANALYSIS (LLM + Quantitative):
-  ./run.sh ai AAPL MSFT --period 6mo      # AI recommendations with backtest
-  ./run.sh ai PLTR TSLA --no-llm          # Quantitative metrics only
-  ./run.sh ai AAPL --show-prompt          # Show LLM prompt for transparency
-  ./run.sh ai <portfolio_id> --period 1y  # Analyze entire portfolio
-  ./run.sh ai NVDA --model qwen2:7b       # Use specific Ollama model
+  ./clarifi.sh ai AAPL MSFT --period 6mo      # AI recommendations with backtest
+  ./clarifi.sh ai PLTR TSLA --no-llm          # Quantitative metrics only
+  ./clarifi.sh ai AAPL --show-prompt          # Show LLM prompt for transparency
+  ./clarifi.sh ai <portfolio_id> --period 1y  # Analyze entire portfolio
+  ./clarifi.sh ai NVDA --model qwen2:7b       # Use specific Ollama model
 
 📡 ALPHA VANTAGE API INTEGRATION:
-  ./run.sh av news-sentiment AAPL MSFT --limit 20
-  ./run.sh av news-sentiment --topics technology finance --analyze
-  ./run.sh av overview TSLA
-  ./run.sh av quote NVDA
-  ./run.sh av income-statement AAPL --annual
-  ./run.sh av earnings GOOGL
+  ./clarifi.sh av news-sentiment AAPL MSFT --limit 20
+  ./clarifi.sh av news-sentiment --topics technology finance --analyze
+  ./clarifi.sh av overview TSLA
+  ./clarifi.sh av quote NVDA
+  ./clarifi.sh av income-statement AAPL --annual
+  ./clarifi.sh av balance-sheet MSFT --quarterly
+  ./clarifi.sh av cash-flow GOOGL --annual
+  ./clarifi.sh av earnings GOOGL
+  ./clarifi.sh av top-gainers-losers --format table
 
-� PORTFOLIO MANAGEMENT:
-    ./run.sh portfolio create --name MyPortfolio --description "Core holdings"
-    ./run.sh portfolio list
-    ./run.sh portfolio info <portfolio_id_or_name>
-    ./run.sh portfolio info <portfolio_id_or_name> --analytics
-    ./run.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
-    ./run.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
-    ./run.sh portfolio tickers <portfolio_id>
-    ./run.sh portfolio analyze <portfolio_id> --period 6mo --include-deep
-    ./run.sh portfolio analyze <portfolio_id> --summary-only
-    ./run.sh portfolio remove <portfolio_id> AAPL
-    ./run.sh portfolio history --portfolio-id <portfolio_id> --limit 5
-    ./run.sh portfolio accuracy --portfolio-id <portfolio_id>
+📥 EVENT DATA INGESTION:
+  ./clarifi.sh ingest --file events.json
+  ./clarifi.sh ingest --process
+  ./clarifi.sh ingest --monitor --interval 60
+
+📁 PORTFOLIO MANAGEMENT:
+    ./clarifi.sh portfolio create --name MyPortfolio --description "Core holdings"
+    ./clarifi.sh portfolio list
+    ./clarifi.sh portfolio info <portfolio_id_or_name>
+    ./clarifi.sh portfolio info <portfolio_id_or_name> --analytics
+    ./clarifi.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
+    ./clarifi.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
+    ./clarifi.sh portfolio update <portfolio_id> --name "New Name" --description "Updated"
+    ./clarifi.sh portfolio sync <portfolio_id>  # Update current prices
+    ./clarifi.sh portfolio tickers <portfolio_id>
+    ./clarifi.sh portfolio analyze <portfolio_id> --period 6mo --include-deep
+    ./clarifi.sh portfolio analyze <portfolio_id> --summary-only
+    ./clarifi.sh portfolio remove <portfolio_id> AAPL
+    ./clarifi.sh portfolio delete <portfolio_id> --confirm-name "Exact Portfolio Name"
+    ./clarifi.sh portfolio history --portfolio-id <portfolio_id> --limit 5
+    ./clarifi.sh portfolio accuracy --portfolio-id <portfolio_id>
 
 📊 PORTFOLIO ANALYSIS (Simplified):
-    ./run.sh analyze <portfolio_id_or_name> --period 1y
-    ./run.sh analyze MyPortfolio --include-deep --deep-chunk-months 3
+    ./clarifi.sh analyze <portfolio_id_or_name> --period 1y
+    ./clarifi.sh analyze MyPortfolio --include-deep --deep-chunk-months 3
 
 �💡 TIP: Use quotes for tickers with spaces: "SAAB B"
         """
@@ -1611,10 +1779,10 @@ def main():
         description='Run quantitative factor extraction + optional local LLM synthesis to produce BUY/SELL/HOLD signals.',
         epilog=(
             "Examples:\n"
-            "  ./run.sh ai AAPL MSFT --period 6mo\n"
-            "  ./run.sh ai AAPL --show-prompt\n"
-            "  ./run.sh ai PLTR TSLA --no-llm (quant metrics only)\n"
-            "  ./run.sh ai <portfolio_id> --period 1y\n\n"
+            "  ./clarifi.sh ai AAPL MSFT --period 6mo\n"
+            "  ./clarifi.sh ai AAPL --show-prompt\n"
+            "  ./clarifi.sh ai PLTR TSLA --no-llm (quant metrics only)\n"
+            "  ./clarifi.sh ai <portfolio_id> --period 1y\n\n"
             "Metrics included: avg daily return, annualized vol, max drawdown, SMA(50/200) relationship, RSI(14), simple SMA crossover backtest (strategy vs buy&hold), 30‑day trend slope classification.\n"
             "LLM Prompt: A compact JSON-oriented instruction asking model to emit structured recommendations."
         )
@@ -2066,7 +2234,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -2108,7 +2276,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -2144,7 +2312,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    analysis._print_error(f"No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
@@ -2186,7 +2354,7 @@ def main():
             for ticker in args.tickers:
                 files = analysis.visualizer.find_stock_files(ticker)
                 if not files:
-                    print(f"❌ No data found for {ticker}. Download first with: ./run.sh download {ticker}")
+                    print(f"❌ No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
                     continue
                 latest_file = max(files, key=os.path.getctime)
                 data = analysis.visualizer.load_stock_data(latest_file)
