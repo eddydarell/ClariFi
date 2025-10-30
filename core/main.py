@@ -34,6 +34,21 @@ try:
         from ml_analyzer import MLAnalyzer
     except ImportError:
         MLAnalyzer = None
+    # Import RNN analyzer with fallback
+    try:
+        from rnn_analyzer import RNNAnalyzer
+    except ImportError:
+        RNNAnalyzer = None
+    # Import Transformer analyzer with fallback
+    try:
+        from transformer_analyzer import TransformerAnalyzer
+    except ImportError:
+        TransformerAnalyzer = None
+    # Import RL analyzer with fallback
+    try:
+        from rl_analyzer import RLAnalyzer
+    except ImportError:
+        RLAnalyzer = None
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -53,6 +68,12 @@ class AdvancedStockAnalysis:
         self.seasonal_analyzer = SeasonalAnalyzer()
         # Initialize ML analyzer if available
         self.ml_analyzer = MLAnalyzer() if MLAnalyzer else None
+        # Initialize RNN analyzer if available
+        self.rnn_analyzer = RNNAnalyzer() if RNNAnalyzer else None
+        # Initialize Transformer analyzer if available
+        self.transformer_analyzer = TransformerAnalyzer() if TransformerAnalyzer else None
+        # Initialize RL analyzer if available
+        self.rl_analyzer = RLAnalyzer() if RLAnalyzer else None
 
     def analyze_multi_timeframe(self, ticker, periods=['1mo', '3mo', '6mo', '1y']):
         """
@@ -1707,6 +1728,16 @@ def main():
   ./clarifi.sh rnn AAPL MSFT --models lstm gru --horizon 10
   ./clarifi.sh rnn TSLA --models bidirectional_lstm --period 1y
 
+🔄 TRANSFORMER ANALYSIS:
+  ./clarifi.sh transformer AAPL --period 2y --horizon 5
+  ./clarifi.sh transformer AAPL MSFT --models tft transformer_encoder --horizon 10
+  ./clarifi.sh transformer NVDA --models conv_transformer --period 1y
+
+🎮 REINFORCEMENT LEARNING ANALYSIS:
+  ./clarifi.sh rl AAPL --period 2y --episodes 1000
+  ./clarifi.sh rl AAPL MSFT --models ppo dqn --episodes 2000 --backtest
+  ./clarifi.sh rl TSLA --models q_learning --period 1y
+
 🎯 MARKET INTELLIGENCE FEATURES:
   ✅ Automated data quality validation (price anomalies, gaps, inconsistencies)
   ✅ Enhanced technical indicators (RSI 14/30, MACD with signal, BB width)
@@ -1728,6 +1759,10 @@ def main():
   ✅ Real-time live monitoring with terminal graphs
   ✅ Market screening for gainers, losers, and new listings
   ✅ Seasonal pattern analysis with holiday effects
+  ✅ Machine Learning analysis (Random Forest, XGBoost, LightGBM)
+  ✅ Recurrent Neural Network analysis (LSTM, GRU, Bidirectional)
+  ✅ Transformer-based analysis (TFT, Attention mechanisms)
+  ✅ Reinforcement Learning analysis (Q-Learning, PPO, DQN)
 
 ⚖️ OPTIONS & RISK ANALYSIS:
   ./clarifi.sh analyze AAPL MSFT --period 1y  # Full analysis with options
@@ -1893,6 +1928,25 @@ def main():
     rnn_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
     rnn_parser.add_argument('--models', nargs='+', choices=['lstm', 'gru', 'bidirectional_lstm', 'bidirectional_gru'],
                            default=['lstm', 'gru'], help='RNN models to use')
+
+    # Transformer analysis
+    transformer_parser = subparsers.add_parser('transformer', help='🔄 Transformer-based analysis with TFT and attention mechanisms')
+    transformer_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
+    transformer_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for transformer training)')
+    transformer_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
+    transformer_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    transformer_parser.add_argument('--models', nargs='+', choices=['tft', 'transformer_encoder', 'conv_transformer'],
+                                   default=['tft'], help='Transformer models to use')
+
+    # RL analysis
+    rl_parser = subparsers.add_parser('rl', help='🎮 Reinforcement Learning analysis with Q-Learning and PPO')
+    rl_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
+    rl_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for RL training)')
+    rl_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    rl_parser.add_argument('--models', nargs='+', choices=['q_learning', 'ppo', 'dqn'],
+                          default=['ppo'], help='RL algorithms to use')
+    rl_parser.add_argument('--episodes', type=int, default=1000, help='Number of training episodes (default: 1000)')
+    rl_parser.add_argument('--backtest', action='store_true', help='Run backtesting after training')
 
     # Pattern analysis
     patterns_parser = subparsers.add_parser('patterns', help='🔍 Advanced pattern analysis')
@@ -2495,6 +2549,193 @@ def main():
             except ImportError as e:
                 analysis._print_error(f"RNN analysis not available: {e}")
                 analysis._print_error("Install required packages: pip install scikit-learn xgboost lightgbm")
+
+        elif args.command == 'transformer':
+            # Check if Transformer dependencies are available
+            try:
+                from core.transformer_analyzer import TransformerAnalyzer
+                transformer_analyzer = TransformerAnalyzer()
+                available_models = transformer_analyzer.get_available_models()
+                enabled_models = [m for m in args.models if m in available_models]
+
+                if not enabled_models:
+                    analysis._print_error("No Transformer models available. Please install required dependencies:")
+                    analysis._print_error("pip install torch torchvision tensorflow")
+                    return
+
+                if enabled_models != args.models:
+                    missing = [m for m in args.models if m not in enabled_models]
+                    print(f"⚠️  Warning: Models {missing} not available, using {enabled_models}")
+
+                # Load data and run Transformer analysis
+                results = {}
+                for ticker in args.tickers:
+                    if not getattr(args, 'json', False):
+                        analysis._print_header(f"TRANSFORMER ANALYSIS FOR {ticker}", "🔄")
+
+                    # Download or load data
+                    if not args.no_download:
+                        print(f"📥 Downloading data for {ticker}...")
+                        downloader = StockDownloader()
+                        download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                        if not download_result or not download_result.get(ticker):
+                            analysis._print_error(f"Failed to download data for {ticker}")
+                            continue
+
+                    files = analysis.visualizer.find_stock_files(ticker)
+                    if not files:
+                        analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
+                        continue
+
+                    latest_file = max(files, key=os.path.getctime)
+                    data = analysis.visualizer.load_stock_data(latest_file)
+                    if data is None or len(data) < 100:
+                        analysis._print_error(f"Insufficient data for {ticker} (need 100+ points, got {len(data) if data is not None else 0})")
+                        continue
+
+                    # Run Transformer analysis
+                    transformer_result = transformer_analyzer.analyze(ticker, data, prediction_horizon=args.horizon)
+
+                    if transformer_result:
+                        results[ticker] = transformer_result
+
+                        if not getattr(args, 'json', False):
+                            # Display results
+                            rec = transformer_result.recommendation
+                            print(f"🎯 Recommendation: {rec.action} (Confidence: {rec.confidence:.1f})")
+                            print(f"📈 Predicted Return: {rec.predicted_return_pct:.1f}%")
+                            print(f"⚠️  Risk Score: {rec.risk_score:.2f}")
+                            print(f"🔄 Best Model: {rec.model_used}")
+                            print(f"💡 Reasoning: {rec.reasoning}")
+
+                            # Show attention weights if available
+                            if hasattr(rec, 'attention_focus') and rec.attention_focus:
+                                print("\n🔍 Attention Analysis:")
+                                top_features = sorted(rec.attention_focus.items(), key=lambda x: x[1], reverse=True)[:5]
+                                for feat, weight in top_features:
+                                    print(f"  {feat}: {weight:.3f}")
+
+                            print(f"\n📊 Models Trained: {len(transformer_result.models_trained)}")
+                            for model_result in transformer_result.models_trained:
+                                print(f"  {model_result.model_name}: MSE={model_result.mse:.4f}, MAE={model_result.mae:.4f}")
+                    else:
+                        analysis._print_error(f"Transformer analysis failed for {ticker}")
+
+                result = {
+                    "command": "transformer",
+                    "tickers": args.tickers,
+                    "period": args.period,
+                    "horizon": args.horizon,
+                    "models_used": enabled_models,
+                    "results": results
+                }
+
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
+
+            except ImportError as e:
+                analysis._print_error(f"Transformer analysis not available: {e}")
+                analysis._print_error("Install required packages: pip install torch torchvision tensorflow")
+
+        elif args.command == 'rl':
+            # Check if RL dependencies are available
+            try:
+                from core.rl_analyzer import RLAnalyzer
+                rl_analyzer = RLAnalyzer()
+                available_models = rl_analyzer.get_available_models()
+                enabled_models = [m for m in args.models if m in available_models]
+
+                if not enabled_models:
+                    analysis._print_error("No RL models available. Please install required dependencies:")
+                    analysis._print_error("pip install gym stable-baselines3 torch")
+                    return
+
+                if enabled_models != args.models:
+                    missing = [m for m in args.models if m not in enabled_models]
+                    print(f"⚠️  Warning: Models {missing} not available, using {enabled_models}")
+
+                # Load data and run RL analysis
+                results = {}
+                for ticker in args.tickers:
+                    if not getattr(args, 'json', False):
+                        analysis._print_header(f"REINFORCEMENT LEARNING ANALYSIS FOR {ticker}", "🎮")
+
+                    # Download or load data
+                    if not args.no_download:
+                        print(f"📥 Downloading data for {ticker}...")
+                        downloader = StockDownloader()
+                        download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                        if not download_result or not download_result.get(ticker):
+                            analysis._print_error(f"Failed to download data for {ticker}")
+                            continue
+
+                    files = analysis.visualizer.find_stock_files(ticker)
+                    if not files:
+                        analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
+                        continue
+
+                    latest_file = max(files, key=os.path.getctime)
+                    data = analysis.visualizer.load_stock_data(latest_file)
+                    if data is None or len(data) < 100:
+                        analysis._print_error(f"Insufficient data for {ticker} (need 100+ points, got {len(data) if data is not None else 0})")
+                        continue
+
+                    # Run RL analysis
+                    rl_result = rl_analyzer.analyze(ticker, data)
+
+                    if rl_result:
+                        results[ticker] = rl_result
+
+                        if not getattr(args, 'json', False):
+                            # Display results
+                            rec = rl_result.recommendation
+                            print(f"🎯 Recommendation: {rec.action} (Confidence: {rec.confidence:.1f})")
+                            print(f"� Position Size: {rec.position_size:.1f}")
+                            print(f"🛑 Stop Loss: ${rec.stop_loss:.2f}")
+                            print(f"🎯 Take Profit: ${rec.take_profit:.2f}")
+                            print(f"🎮 Best Model: {rec.model_used}")
+                            print(f"💡 Reasoning: {rec.reasoning}")
+
+                            # Show risk metrics
+                            if hasattr(rec, 'risk_metrics') and rec.risk_metrics:
+                                print("\n📊 Risk Metrics:")
+                                for metric, value in rec.risk_metrics.items():
+                                    if isinstance(value, float):
+                                        print(f"  {metric}: {value:.3f}")
+                                    else:
+                                        print(f"  {metric}: {value}")
+                            # Show models trained
+                            print(f"\n🤖 Models Trained: {len(rl_result.models_trained)}")
+                            for model_result in rl_result.models_trained:
+                                print(f"  {model_result.model_name}: Sharpe={model_result.sharpe_ratio:.3f}, Win Rate={model_result.win_rate:.1%}")
+
+                            # Show backtest results if available
+                            if hasattr(rl_result, 'backtest_results') and rl_result.backtest_results:
+                                print(f"\n🔄 Backtest Results:")
+                                for model_name, backtest in rl_result.backtest_results.items():
+                                    if backtest:
+                                        print(f"  {model_name}: Return={backtest.get('total_return', 0):.2f}%, Trades={backtest.get('total_trades', 0)}")
+                    else:
+                        analysis._print_error(f"RL analysis failed for {ticker}")
+
+                result = {
+                    "command": "rl",
+                    "tickers": args.tickers,
+                    "period": args.period,
+                    "episodes": args.episodes,
+                    "backtest": args.backtest,
+                    "models_used": enabled_models,
+                    "results": results
+                }
+
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
+
+            except ImportError as e:
+                analysis._print_error(f"RL analysis not available: {e}")
+                analysis._print_error("Install required packages: pip install gym stable-baselines3 torch")
 
         elif args.command == 'patterns':
             # Load data
