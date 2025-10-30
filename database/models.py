@@ -235,6 +235,9 @@ class Portfolio:
     def add_ticker(self, portfolio_id: str, ticker: str, quantity: float = 0.0, avg_cost: float = 0.0) -> str:
         """Add a ticker to portfolio"""
         ticker_id = str(uuid.uuid4())
+        existing = None
+        is_update = False
+
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
 
@@ -252,12 +255,8 @@ class Portfolio:
                     SET quantity = ?, avg_cost = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE portfolio_id = ? AND ticker = ?
                 ''', (quantity, avg_cost, portfolio_id, ticker.upper()))
-
-                # Log transaction
-                self._log_transaction(portfolio_id, ticker.upper(), "UPDATE_QUANTITY",
-                                    {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
-                                    {"quantity": quantity, "avg_cost": avg_cost})
                 ticker_id = existing["id"]
+                is_update = True
             else:
                 # Insert new ticker
                 cursor.execute('''
@@ -265,11 +264,17 @@ class Portfolio:
                     VALUES (?, ?, ?, ?, ?)
                 ''', (ticker_id, portfolio_id, ticker.upper(), quantity, avg_cost))
 
-                # Log transaction
-                self._log_transaction(portfolio_id, ticker.upper(), "ADD",
-                                    None, {"quantity": quantity, "avg_cost": avg_cost})
-
             conn.commit()
+
+        # Log transaction after commit to avoid database lock
+        if is_update:
+            self._log_transaction(portfolio_id, ticker.upper(), "UPDATE_QUANTITY",
+                                {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
+                                {"quantity": quantity, "avg_cost": avg_cost})
+        else:
+            self._log_transaction(portfolio_id, ticker.upper(), "ADD",
+                                None, {"quantity": quantity, "avg_cost": avg_cost})
+
         return ticker_id
 
     def remove_ticker(self, portfolio_id: str, ticker: str) -> bool:

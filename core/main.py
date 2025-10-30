@@ -2648,7 +2648,7 @@ def main():
 
                 if not enabled_models:
                     analysis._print_error("No RL models available. Please install required dependencies:")
-                    analysis._print_error("pip install gym stable-baselines3 torch")
+                    analysis._print_error("pip install gymnasium stable-baselines3 torch")
                     return
 
                 if enabled_models != args.models:
@@ -2735,7 +2735,7 @@ def main():
 
             except ImportError as e:
                 analysis._print_error(f"RL analysis not available: {e}")
-                analysis._print_error("Install required packages: pip install gym stable-baselines3 torch")
+                analysis._print_error("Install required packages: pip install gymnasium stable-baselines3 torch")
 
         elif args.command == 'patterns':
             # Load data

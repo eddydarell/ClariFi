@@ -17,6 +17,9 @@ warnings.filterwarnings('ignore')
 # TensorFlow/Keras imports with fallbacks
 try:
     import tensorflow as tf
+    # Suppress TensorFlow warnings and info messages
+    tf.get_logger().setLevel('ERROR')
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     from tensorflow import keras
     from tensorflow.keras.models import Model
     from tensorflow.keras.layers import (
@@ -351,7 +354,7 @@ class TransformerAnalyzer:
         )
 
         # Save model
-        model_path = os.path.join(self.models_dir, f'{model_name}_transformer.h5')
+        model_path = os.path.join(self.models_dir, f'{model_name}_transformer.keras')
         model.save(model_path)
 
         self.models[model_name] = model
@@ -360,7 +363,7 @@ class TransformerAnalyzer:
     def predict(self, model_name: str, X: np.ndarray) -> np.ndarray:
         """Make predictions with a trained model."""
         if model_name not in self.models:
-            model_path = os.path.join(self.models_dir, f'{model_name}_transformer.h5')
+            model_path = os.path.join(self.models_dir, f'{model_name}_transformer.keras')
             if os.path.exists(model_path):
                 self.models[model_name] = tf.keras.models.load_model(model_path)
             else:

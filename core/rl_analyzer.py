@@ -15,8 +15,8 @@ warnings.filterwarnings('ignore')
 
 # RL libraries
 try:
-    import gym
-    from gym import spaces
+    import gymnasium as gym
+    from gymnasium import spaces
     GYM_AVAILABLE = True
 except ImportError:
     GYM_AVAILABLE = False
@@ -78,7 +78,7 @@ class RLAnalysisResult:
 
 class TradingEnvironment(gym.Env):
     """
-    Custom Gym environment for stock trading with RL.
+    Custom Gymnasium environment for stock trading with RL.
     """
 
     def __init__(self, data: pd.DataFrame, initial_balance: float = 10000,
