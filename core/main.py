@@ -29,6 +29,11 @@ try:
     from live_monitor import LiveStockMonitor
     from stock_screener import StockScreener
     from alphavantage_analyzer import AlphaVantageAnalyzer
+    # Import ML analyzer with fallback
+    try:
+        from ml_analyzer import MLAnalyzer
+    except ImportError:
+        MLAnalyzer = None
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all required packages are installed.")
@@ -46,6 +51,8 @@ class AdvancedStockAnalysis:
         self.options_analyzer = OptionsAnalyzer()
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
+        # Initialize ML analyzer if available
+        self.ml_analyzer = MLAnalyzer() if MLAnalyzer else None
 
     def analyze_multi_timeframe(self, ticker, periods=['1mo', '3mo', '6mo', '1y']):
         """
@@ -236,7 +243,7 @@ class AdvancedStockAnalysis:
                              include_patterns=True, include_events=True,
                              include_advanced_viz=True, include_options=True,
                              include_investment_advice=True, include_seasonal=True,
-                             include_deep=False, deep_chunk_months=3, json_output=False):
+                             include_deep=False, deep_chunk_months=3, include_ml=False, json_output=False):
         """
         Perform comprehensive market analysis including patterns, events, options, and investment advice.
 
@@ -252,6 +259,7 @@ class AdvancedStockAnalysis:
             include_seasonal (bool): Whether to include seasonal analysis
             include_deep (bool): Whether to include deep backtesting analysis
             deep_chunk_months (int): Chunk size in months for deep analysis
+            include_ml (bool): Whether to include machine learning analysis
             json_output (bool): Whether to return structured data instead of printing
         """
         if not json_output:
@@ -266,6 +274,7 @@ class AdvancedStockAnalysis:
             if include_investment_advice: features.append("Investment Advice")
             if include_seasonal: features.append("Seasonal")
             if include_deep: features.append("Deep Analysis")
+            if include_ml: features.append("ML Analysis")
             print(f"🔧 Analysis Features: {', '.join(features)}")
             if include_deep:
                 print(f"🔬 Deep Analysis: Chunk size = {deep_chunk_months} months")
@@ -290,6 +299,7 @@ class AdvancedStockAnalysis:
         if include_investment_advice: result["features"].append("investment_advice")
         if include_seasonal: result["features"].append("seasonal")
         if include_deep: result["features"].append("deep_analysis")
+        if include_ml: result["features"].append("ml_analysis")
 
         # Step 1: Download data
         stock_data_dict = {}
@@ -612,7 +622,60 @@ class AdvancedStockAnalysis:
                 else:
                     self._print_warning("No seasonal patterns detected (insufficient data)")
 
-        # Step 6.6: Deep Analysis (Historical Backtesting)
+        # Step 6.6: ML Analysis
+        ml_results = {}
+        if include_ml:
+            if not json_output:
+                self._print_section_header("MACHINE LEARNING ANALYSIS")
+
+            if self.ml_analyzer is None:
+                error_msg = "ML analyzer not available. Please install required packages: pip install scikit-learn xgboost lightgbm"
+                if json_output:
+                    result["errors"].append(error_msg)
+                else:
+                    self._print_error(error_msg)
+            else:
+                for ticker in tickers:
+                    if ticker in stock_data_dict:
+                        if not json_output:
+                            self._print_subsection(f"Running ML analysis for {ticker}")
+                        try:
+                            ml_result = self.ml_analyzer.analyze(stock_data_dict[ticker], ticker, prediction_horizon=5)
+                            if ml_result:
+                                ml_results[ticker] = ml_result
+
+                                if not json_output:
+                                    # Display key ML insights
+                                    rec = ml_result.recommendation
+                                    print(f"    🎯 Recommendation: {rec.action} (Confidence: {rec.confidence:.1f})")
+                                    print(f"    📈 Predicted Return: {rec.predicted_return_pct:.1f}%")
+                                    print(f"    🧠 Best Model: {ml_result.best_model}")
+                                    print(f"    💡 Reasoning: {rec.reasoning}")
+
+                                    # Show top features if available
+                                    if ml_result.feature_analysis:
+                                        top_features = list(ml_result.feature_analysis.items())[:3]
+                                        feature_str = ", ".join([f"{feat}: {imp:.3f}" for feat, imp in top_features])
+                                        print(f"    🔍 Top Features: {feature_str}")
+                            else:
+                                if not json_output:
+                                    self._print_warning(f"ML analysis failed for {ticker}")
+                        except Exception as e:
+                            error_msg = f"ML analysis error for {ticker}: {str(e)}"
+                            if json_output:
+                                result["errors"].append(error_msg)
+                            else:
+                                self._print_error(error_msg)
+
+            result["analyses"]["ml_analysis"] = self._convert_to_json_serializable(ml_results) if json_output else ml_results
+
+            if not json_output:
+                if ml_results:
+                    self._print_success("ML analysis completed!")
+                else:
+                    self._print_warning("ML analysis completed with no results")
+
+        # Step 6.7: Deep Analysis (Historical Backtesting)
         deep_results = {}
         if include_deep:
             if not json_output:
@@ -1634,6 +1697,16 @@ def main():
   ./clarifi.sh seasonal AAPL MSFT --period 5y
   ./clarifi.sh seasonal PLTR --period 3y --no-download
 
+🤖 MACHINE LEARNING ANALYSIS:
+  ./clarifi.sh ml_analyze AAPL --period 2y --horizon 5
+  ./clarifi.sh ml_analyze AAPL MSFT --models random_forest xgboost --horizon 10
+  ./clarifi.sh analyze AAPL --include-ml --period 1y  # ML in comprehensive analysis
+
+🧠 RECURRENT NEURAL NETWORK ANALYSIS:
+  ./clarifi.sh rnn AAPL --period 2y --horizon 5
+  ./clarifi.sh rnn AAPL MSFT --models lstm gru --horizon 10
+  ./clarifi.sh rnn TSLA --models bidirectional_lstm --period 1y
+
 🎯 MARKET INTELLIGENCE FEATURES:
   ✅ Automated data quality validation (price anomalies, gaps, inconsistencies)
   ✅ Enhanced technical indicators (RSI 14/30, MACD with signal, BB width)
@@ -1770,6 +1843,7 @@ def main():
     analyze_parser.add_argument('--no-seasonal', action='store_true', help='Skip seasonal analysis')
     analyze_parser.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis')
     analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
+    analyze_parser.add_argument('--include-ml', action='store_true', help='Include machine learning analysis')
     analyze_parser.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
 
     # AI analysis (LLM powered)
@@ -1801,6 +1875,24 @@ def main():
     seasonal_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     seasonal_parser.add_argument('--period', '-p', default='5y', help='Time period (default: 5y for better patterns)')
     seasonal_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+
+    # ML analysis
+    ml_parser = subparsers.add_parser('ml_analyze', help='🤖 Machine Learning analysis with Random Forest, XGBoost, LightGBM')
+    ml_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
+    ml_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for ML training)')
+    ml_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
+    ml_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    ml_parser.add_argument('--models', nargs='+', choices=['random_forest', 'xgboost', 'lightgbm'],
+                          default=['random_forest', 'xgboost', 'lightgbm'], help='ML models to use')
+
+    # RNN analysis
+    rnn_parser = subparsers.add_parser('rnn', help='🧠 Recurrent Neural Network analysis with LSTM/GRU')
+    rnn_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
+    rnn_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for RNN training)')
+    rnn_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
+    rnn_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    rnn_parser.add_argument('--models', nargs='+', choices=['lstm', 'gru', 'bidirectional_lstm', 'bidirectional_gru'],
+                           default=['lstm', 'gru'], help='RNN models to use')
 
     # Pattern analysis
     patterns_parser = subparsers.add_parser('patterns', help='🔍 Advanced pattern analysis')
@@ -2126,6 +2218,7 @@ def main():
                     include_events=not args.no_events,
                     include_options=not args.no_options,
                     include_seasonal=not args.no_seasonal,
+                    include_ml=getattr(args, 'include_ml', False),
                     include_deep=args.include_deep,
                     deep_chunk_months=args.deep_chunk_months
                 )
@@ -2209,6 +2302,7 @@ def main():
                     include_options=not args.no_options,
                     include_investment_advice=not args.no_investment_advice,
                     include_seasonal=not args.no_seasonal,
+                    include_ml=getattr(args, 'include_ml', False),
                     include_deep=args.include_deep,
                     deep_chunk_months=args.deep_chunk_months,
                     json_output=getattr(args, 'json', False)
@@ -2227,6 +2321,180 @@ def main():
             if getattr(args, 'json', False):
                 import json
                 print(json.dumps(result, indent=2))
+
+        elif args.command == 'ml_analyze':
+            # Check if ML dependencies are available
+            try:
+                from core.ml_analyzer import MLAnalyzer
+                ml_analyzer = MLAnalyzer()
+                available_models = ml_analyzer.get_available_models()
+                enabled_models = [m for m in args.models if available_models.get(m, False)]
+
+                if not enabled_models:
+                    analysis._print_error("No ML models available. Please install required dependencies:")
+                    analysis._print_error("pip install scikit-learn xgboost lightgbm")
+                    return
+
+                if enabled_models != args.models:
+                    missing = [m for m in args.models if m not in enabled_models]
+                    print(f"⚠️  Warning: Models {missing} not available, using {enabled_models}")
+
+                # Load data and run ML analysis
+                results = {}
+                for ticker in args.tickers:
+                    if not getattr(args, 'json', False):
+                        analysis._print_header(f"ML ANALYSIS FOR {ticker}", "🤖")
+
+                    # Download or load data
+                    if not args.no_download:
+                        print(f"📥 Downloading data for {ticker}...")
+                        downloader = StockDownloader()
+                        download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                        if not download_result or not download_result.get(ticker):
+                            analysis._print_error(f"Failed to download data for {ticker}")
+                            continue
+
+                    files = analysis.visualizer.find_stock_files(ticker)
+                    if not files:
+                        analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
+                        continue
+
+                    latest_file = max(files, key=os.path.getctime)
+                    data = analysis.visualizer.load_stock_data(latest_file)
+                    if data is None or len(data) < 100:
+                        analysis._print_error(f"Insufficient data for {ticker} (need 100+ points, got {len(data) if data is not None else 0})")
+                        continue
+
+                    # Run ML analysis
+                    ml_result = ml_analyzer.analyze(data, ticker, prediction_horizon=args.horizon)
+
+                    if ml_result:
+                        results[ticker] = ml_result
+
+                        if not getattr(args, 'json', False):
+                            # Display results
+                            rec = ml_result.recommendation
+                            print(f"🎯 Recommendation: {rec.action} (Confidence: {rec.confidence:.1f})")
+                            print(f"📈 Predicted Return: {rec.predicted_return_pct:.1f}%")
+                            print(f"⚠️  Risk Score: {rec.risk_score:.2f}")
+                            print(f"🧠 Best Model: {ml_result.best_model}")
+                            print(f"💡 Reasoning: {rec.reasoning}")
+
+                            # Show top features
+                            if ml_result.feature_analysis:
+                                print("\n🔍 Top Features:")
+                                for feat, imp in list(ml_result.feature_analysis.items())[:5]:
+                                    print(f"  {feat}: {imp:.3f}")
+
+                            print(f"\n📊 Models Trained: {len(ml_result.models_trained)}")
+                            for model in ml_result.models_trained:
+                                if model.mse is not None:
+                                    print(f"  {model.model_name}: MSE={model.mse:.4f}, MAE={model.mae:.4f}")
+                    else:
+                        analysis._print_error(f"ML analysis failed for {ticker}")
+
+                result = {
+                    "command": "ml_analyze",
+                    "tickers": args.tickers,
+                    "period": args.period,
+                    "horizon": args.horizon,
+                    "models_used": enabled_models,
+                    "results": results
+                }
+
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
+
+            except ImportError as e:
+                analysis._print_error(f"ML analysis not available: {e}")
+
+        elif args.command == 'rnn':
+            # Check if RNN dependencies are available
+            try:
+                from core.rnn_analyzer import RNNAnalyzer
+                rnn_analyzer = RNNAnalyzer()
+                available_models = rnn_analyzer.get_available_models()
+                enabled_models = [m for m in args.models if m in available_models]
+
+                if not enabled_models:
+                    analysis._print_error("No RNN models available. Please install required dependencies:")
+                    analysis._print_error("pip install tensorflow>=2.13.0")
+                    return
+
+                if enabled_models != args.models:
+                    missing = [m for m in args.models if m not in enabled_models]
+                    print(f"⚠️  Warning: Models {missing} not available, using {enabled_models}")
+
+                # Load data and run RNN analysis
+                results = {}
+                for ticker in args.tickers:
+                    if not getattr(args, 'json', False):
+                        analysis._print_header(f"RNN ANALYSIS FOR {ticker}", "🧠")
+
+                    # Download or load data
+                    if not args.no_download:
+                        print(f"📥 Downloading data for {ticker}...")
+                        downloader = StockDownloader()
+                        download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                        if not download_result or not download_result.get(ticker):
+                            analysis._print_error(f"Failed to download data for {ticker}")
+                            continue
+
+                    files = analysis.visualizer.find_stock_files(ticker)
+                    if not files:
+                        analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
+                        continue
+
+                    latest_file = max(files, key=os.path.getctime)
+                    data = analysis.visualizer.load_stock_data(latest_file)
+                    if data is None or len(data) < 100:
+                        analysis._print_error(f"Insufficient data for {ticker} (need 100+ points, got {len(data) if data is not None else 0})")
+                        continue
+
+                    # Run RNN analysis
+                    rnn_result = rnn_analyzer.analyze(data, ticker, prediction_horizon=args.horizon)
+
+                    if rnn_result:
+                        results[ticker] = rnn_result
+
+                        if not getattr(args, 'json', False):
+                            # Display results
+                            rec = rnn_result.recommendation
+                            print(f"🎯 Recommendation: {rec.action} (Confidence: {rec.confidence:.1f})")
+                            print(f"📈 Predicted Return: {rec.predicted_return:.1f}%")
+                            print(f"⚠️  Risk Score: {rec.risk_score:.2f}")
+                            print(f"🧠 Best Model: {rec.model_used}")
+                            print(f"💡 Reasoning: {rec.reasoning}")
+
+                            # Show top features
+                            if rnn_result.feature_importance:
+                                print("\n🔍 Top Features:")
+                                for feat, imp in list(rnn_result.feature_importance.items())[:5]:
+                                    print(f"  {feat}: {imp:.3f}")
+
+                            print(f"\n📊 Models Trained: {len(rnn_result.models_results)}")
+                            for model_name, model_result in rnn_result.models_results.items():
+                                print(f"  {model_name}: MSE={model_result.mse:.4f}, MAE={model_result.mae:.4f}")
+                    else:
+                        analysis._print_error(f"RNN analysis failed for {ticker}")
+
+                result = {
+                    "command": "rnn",
+                    "tickers": args.tickers,
+                    "period": args.period,
+                    "horizon": args.horizon,
+                    "models_used": enabled_models,
+                    "results": results
+                }
+
+                if getattr(args, 'json', False):
+                    import json
+                    print(json.dumps(result, indent=2))
+
+            except ImportError as e:
+                analysis._print_error(f"RNN analysis not available: {e}")
+                analysis._print_error("Install required packages: pip install scikit-learn xgboost lightgbm")
 
         elif args.command == 'patterns':
             # Load data

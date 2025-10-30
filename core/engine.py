@@ -26,6 +26,7 @@ from event_correlator import EventCorrelator
 from advanced_visualizer import AdvancedVisualizer
 from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
 from seasonal_analyzer import SeasonalAnalyzer
+from ml_analyzer import MLAnalyzer
 
 
 class ClariFiEngine:
@@ -48,6 +49,7 @@ class ClariFiEngine:
         self.options_analyzer = OptionsAnalyzer()
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
+        self.ml_analyzer = MLAnalyzer()
 
     def _make_json_serializable(self, obj):
         """Convert pandas objects and numpy types to JSON-serializable Python types."""
@@ -582,7 +584,7 @@ class ClariFiEngine:
                              period: str = "1y", save_to_db: bool = True,
                              include_patterns: bool = True, include_events: bool = True,
                              include_options: bool = True, include_seasonal: bool = True,
-                             include_deep: bool = False, deep_chunk_months: int = 3) -> Dict[str, Any]:
+                             include_ml: bool = False, include_deep: bool = False, deep_chunk_months: int = 3) -> Dict[str, Any]:
         """Perform comprehensive analysis on tickers"""
 
         command_id = self.log_command("comprehensive_analysis", {
@@ -593,6 +595,7 @@ class ClariFiEngine:
             "include_events": include_events,
             "include_options": include_options,
             "include_seasonal": include_seasonal,
+            "include_ml": include_ml,
             "include_deep": include_deep,
             "deep_chunk_months": deep_chunk_months
         })
@@ -677,6 +680,17 @@ class ClariFiEngine:
                         except Exception as e:
                             print(f"⚠️  Seasonal analysis failed for {ticker}: {str(e)}")
                             ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
+
+                    # ML Analysis
+                    if include_ml:
+                        print(f"🤖 Running ML analysis for {ticker}...")
+                        try:
+                            ml_data = self.ml_analyzer.analyze(stock_data, ticker, prediction_horizon=5)
+                            # Ensure JSON serializable
+                            ticker_results["ml_analysis"] = self._make_json_serializable(ml_data)
+                        except Exception as e:
+                            print(f"⚠️  ML analysis failed for {ticker}: {str(e)}")
+                            ticker_results["ml_analysis"] = {"error": f"ML analysis failed: {str(e)}"}
 
                     # Deep (historical chunk) Analysis / Backtesting
                     if include_deep:

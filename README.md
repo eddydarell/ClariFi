@@ -260,6 +260,14 @@ python3 core/main.py options AAPL --strike 150 --expiry 2024-12-20
 
 # Seasonal patterns only
 python3 core/main.py seasonal MSFT --period 5y
+
+# Machine Learning analysis
+python3 core/main.py ml_analyze AAPL --period 2y --horizon 5
+python3 core/main.py ml_analyze AAPL MSFT --models random_forest xgboost
+
+# Recurrent Neural Network analysis
+python3 core/main.py rnn AAPL --period 2y --horizon 5
+python3 core/main.py rnn TSLA --models lstm bidirectional_gru
 ```
 
 #### Real-time Monitoring
@@ -350,6 +358,48 @@ for ticker, data in patterns.items():
     print(f"{ticker} worst months: {data['worst_months']}")
 ```
 
+### ML Analysis Usage
+
+Advanced ensemble methods for price prediction:
+
+```python
+from core.ml_analyzer import MLAnalyzer
+
+ml_analyzer = MLAnalyzer()
+
+# Analyze stock with ML models
+result = ml_analyzer.analyze(stock_data, "AAPL", prediction_horizon=5)
+
+print(f"Recommendation: {result.recommendation.action}")
+print(f"Confidence: {result.recommendation.confidence:.1%}")
+print(f"Predicted Return: {result.recommendation.predicted_return:.2f}%")
+
+# View model performance
+for model_name, model_result in result.models_results.items():
+    print(f"{model_name}: MSE={model_result.mse:.4f}, MAE={model_result.mae:.4f}")
+```
+
+### RNN Analysis Usage
+
+Deep learning for time series forecasting:
+
+```python
+from core.rnn_analyzer import RNNAnalyzer
+
+rnn_analyzer = RNNAnalyzer()
+
+# Analyze stock with RNN models
+result = rnn_analyzer.analyze(stock_data, "AAPL", prediction_horizon=5)
+
+print(f"Recommendation: {result.recommendation.action}")
+print(f"Confidence: {result.recommendation.confidence:.1%}")
+print(f"Predicted Return: {result.recommendation.predicted_return:.2f}%")
+
+# View trained models
+for model_name, model_result in result.models_results.items():
+    print(f"{model_name}: MSE={model_result.mse:.4f}, MAE={model_result.mae:.4f}")
+```
+
 ### Real-time Monitoring Setup
 
 Set up live market monitoring:
@@ -395,6 +445,22 @@ analysis = engine.analyze_portfolio(portfolio_id, include_options=True)
 - **Volatility**: Bollinger Bands, ATR, volatility clustering
 - **Pattern Recognition**: Support/resistance, trend lines
 - **Volume Analysis**: Volume trends, OBV, volume-price correlation
+
+### Machine Learning Analysis
+
+- **Ensemble Methods**: Random Forest, XGBoost, LightGBM for price prediction
+- **Feature Engineering**: Technical indicators, volatility measures, momentum features
+- **Time Series Cross-Validation**: Proper validation for financial time series
+- **Recommendation Engine**: BUY/HOLD/SELL with confidence scores and risk assessment
+- **Model Interpretability**: Feature importance analysis and performance metrics
+
+### Deep Learning Analysis
+
+- **RNN Architectures**: LSTM, GRU, Bidirectional variants for sequence prediction
+- **Time Series Processing**: Sequence creation, scaling, and temporal feature extraction
+- **Neural Network Training**: Early stopping, dropout, and learning rate scheduling
+- **Advanced Forecasting**: Multi-step ahead predictions with uncertainty estimation
+- **Model Comparison**: Automated evaluation of different RNN architectures
 
 ### Fundamental Integration
 
