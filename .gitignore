@@ -272,3 +272,6 @@ data/
 graphs/
 venv/
 .history/
+models/
+.checkpoints/
+.experiments/

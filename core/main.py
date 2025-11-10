@@ -1561,6 +1561,251 @@ class AdvancedStockAnalysis:
             if not best_opportunities and not high_risks:
                 print(f"     📊 Consider market timing and additional research")
 
+    def full_analysis(self, ticker, period="1y", verbose=False, json_output=False):
+        """
+        Run all available analysis commands sequentially for a single ticker
+        and return a consensus recommendation (BUY, SELL, or HOLD).
+
+        Args:
+            ticker (str): Stock ticker symbol
+            period (str): Time period for analysis
+            verbose (bool): Output individual analysis results
+            json_output (bool): Return results as JSON
+
+        Returns:
+            dict: Full analysis results with consensus recommendation
+        """
+        if not json_output:
+            self._print_header(f"FULL ANALYSIS FOR {ticker}", "🎯")
+            print(f"Running all available analysis commands...")
+            print(f"Period: {period}")
+            print()
+
+        results = {
+            'ticker': ticker,
+            'period': period,
+            'timestamp': datetime.now().isoformat(),
+            'analyses': {},
+            'consensus': None,
+            'recommendations': {},
+            'errors': []
+        }
+
+        total_steps = 6
+
+        # 1. Download data first
+        if not json_output:
+            print(f"📥 [1/{total_steps}] Downloading data...")
+        try:
+            download_result = self.downloader.download_multiple_stocks([ticker], None, None, period)
+            if download_result and download_result.get(ticker):
+                results['analyses']['download'] = {'status': 'success'}
+                if verbose and not json_output:
+                    print("    ✅ Data download completed")
+            else:
+                results['errors'].append('Data download failed')
+                if not json_output:
+                    print("    ❌ Data download failed")
+        except Exception as e:
+            results['errors'].append(f'Download error: {str(e)}')
+            if not json_output:
+                print(f"    ❌ Download error: {str(e)}")
+
+        # 2. Comprehensive Analysis
+        if not json_output:
+            print(f"\n🔬 [2/{total_steps}] Comprehensive analysis...")
+        try:
+            comp_result = self.comprehensive_analysis(
+                [ticker], period, download=False,
+                include_patterns=True, include_events=True,
+                include_advanced_viz=False, include_options=True,
+                include_investment_advice=True, include_seasonal=True,
+                json_output=True
+            )
+            results['analyses']['comprehensive'] = comp_result
+
+            # Extract recommendation
+            if comp_result and isinstance(comp_result, dict):
+                recs = comp_result.get('recommendations', {})
+                if ticker in recs:
+                    rec_data = recs[ticker]
+                    if isinstance(rec_data, dict):
+                        rec = rec_data.get('overall_recommendation', 'UNKNOWN')
+                    else:
+                        rec = rec_data
+                    results['recommendations']['comprehensive'] = rec
+                    if verbose and not json_output:
+                        print(f"    ✅ Recommendation: {rec}")
+                        if isinstance(rec_data, dict):
+                            conf = rec_data.get('confidence_level', 'N/A')
+                            print(f"       Confidence: {conf}")
+        except Exception as e:
+            results['errors'].append(f'Comprehensive analysis error: {str(e)}')
+            if verbose and not json_output:
+                print(f"    ⚠️  Comprehensive analysis error: {str(e)}")
+
+        # 3. Seasonal Analysis
+        if not json_output:
+            print(f"\n🗓️  [3/{total_steps}] Seasonal analysis...")
+        try:
+            seasonal_result = self.seasonal_only([ticker], period="5y", download=False, json_output=True)
+            results['analyses']['seasonal'] = seasonal_result
+
+            # Extract recommendation from seasonal
+            if seasonal_result and isinstance(seasonal_result, dict):
+                seasonal_recs = seasonal_result.get('recommendations', {})
+                if ticker in seasonal_recs:
+                    results['recommendations']['seasonal'] = seasonal_recs[ticker]
+                    if verbose and not json_output:
+                        print(f"    ✅ Recommendation: {seasonal_recs[ticker]}")
+        except Exception as e:
+            results['errors'].append(f'Seasonal analysis error: {str(e)}')
+            if verbose and not json_output:
+                print(f"    ⚠️  Seasonal analysis error: {str(e)}")
+
+        # 4. Multi-timeframe Analysis
+        if not json_output:
+            print(f"\n📊 [4/{total_steps}] Multi-timeframe analysis...")
+        try:
+            mtf_result = self.analyze_multi_timeframe(ticker)
+            results['analyses']['multi_timeframe'] = mtf_result
+
+            if mtf_result and 'consensus' in mtf_result:
+                consensus = mtf_result['consensus']
+                results['recommendations']['multi_timeframe'] = consensus
+                if verbose and not json_output:
+                    print(f"    ✅ Consensus: {consensus}")
+                    print(f"       Confidence: {mtf_result.get('confidence', 'N/A')}")
+        except Exception as e:
+            results['errors'].append(f'Multi-timeframe analysis error: {str(e)}')
+            if verbose and not json_output:
+                print(f"    ⚠️  Multi-timeframe analysis error: {str(e)}")
+
+        # 5. RNN Analysis (if available)
+        if not json_output:
+            print(f"\n� [5/{total_steps}] RNN analysis...")
+        if self.rnn_analyzer:
+            try:
+                files = self.visualizer.find_stock_files(ticker)
+                if files:
+                    latest_file = max(files, key=os.path.getctime)
+                    data = self.visualizer.load_stock_data(latest_file)
+                    if data is not None and len(data) >= 100:
+                        rnn_result = self.rnn_analyzer.analyze(data, ticker)
+                        if rnn_result:
+                            results['analyses']['rnn'] = {
+                                'recommendation': rnn_result.recommendation.action,
+                                'confidence': rnn_result.recommendation.confidence,
+                                'predicted_return': rnn_result.recommendation.predicted_return_pct
+                            }
+                            results['recommendations']['rnn'] = rnn_result.recommendation.action
+                            if verbose and not json_output:
+                                print(f"    ✅ Recommendation: {rnn_result.recommendation.action}")
+                                print(f"       Confidence: {rnn_result.recommendation.confidence:.1f}")
+                    else:
+                        if verbose and not json_output:
+                            print("    ⚠️  Insufficient data for RNN analysis")
+            except Exception as e:
+                results['errors'].append(f'RNN analysis error: {str(e)}')
+                if verbose and not json_output:
+                    print(f"    ⚠️  RNN analysis error: {str(e)}")
+        else:
+            if verbose and not json_output:
+                print("    ⚠️  RNN analyzer not available")
+
+        # 6. Options Analysis
+        if not json_output:
+            print(f"\n📈 [6/{total_steps}] Options analysis...")
+        try:
+            options_result = self.options_analyzer.analyze_options_with_greeks(ticker)
+            if options_result:
+                results['analyses']['options'] = options_result
+                if verbose and not json_output:
+                    print(f"    ✅ Options data retrieved")
+        except Exception as e:
+            results['errors'].append(f'Options analysis error: {str(e)}')
+            if verbose and not json_output:
+                print(f"    ⚠️  Options analysis error: {str(e)}")
+
+        # Calculate consensus recommendation
+        if not json_output:
+            print(f"\n🎯 Calculating consensus recommendation...")
+
+        recommendations = results['recommendations']
+        buy_count = 0
+        sell_count = 0
+        hold_count = 0
+
+        for analysis_type, rec in recommendations.items():
+            rec_upper = str(rec).upper()
+            if 'BUY' in rec_upper or 'BULLISH' in rec_upper:
+                buy_count += 1
+            elif 'SELL' in rec_upper or 'BEARISH' in rec_upper:
+                sell_count += 1
+            elif 'HOLD' in rec_upper or 'NEUTRAL' in rec_upper:
+                hold_count += 1
+
+        total_recs = buy_count + sell_count + hold_count
+
+        if total_recs == 0:
+            consensus = 'INSUFFICIENT_DATA'
+            confidence = 0
+        else:
+            # Determine consensus
+            max_count = max(buy_count, sell_count, hold_count)
+            consensus_pct = (max_count / total_recs) * 100
+
+            if buy_count == max_count:
+                consensus = 'BUY'
+            elif sell_count == max_count:
+                consensus = 'SELL'
+            else:
+                consensus = 'HOLD'
+
+            # Determine confidence
+            if consensus_pct >= 75:
+                confidence = 'HIGH'
+            elif consensus_pct >= 60:
+                confidence = 'MEDIUM'
+            else:
+                confidence = 'LOW'
+
+        results['consensus'] = {
+            'recommendation': consensus,
+            'confidence': confidence,
+            'buy_count': buy_count,
+            'sell_count': sell_count,
+            'hold_count': hold_count,
+            'total_analyses': total_recs,
+            'agreement_pct': round((max_count / total_recs * 100) if total_recs > 0 else 0, 1)
+        }
+
+        # Output results
+        if json_output:
+            return results
+        else:
+            # Format sub-recommendations for display
+            sub_recs = []
+            for analysis_type, rec in sorted(recommendations.items()):
+                sub_recs.append(f"{analysis_type}: {rec}")
+            sub_recs_str = ", ".join(sub_recs)
+
+            print("\n" + "=" * 70)
+            self._print_header(f"CONSENSUS RECOMMENDATION FOR {ticker}", "🎯")
+            print(f"\n{consensus} ({sub_recs_str})")
+            print(f"\nConfidence: {confidence} ({results['consensus']['agreement_pct']:.1f}% agreement)")
+            print(f"Summary: {buy_count} BUY, {sell_count} SELL, {hold_count} HOLD")
+
+            if results['errors']:
+                print("\n⚠️  Warnings/Errors:")
+                for error in results['errors']:
+                    print(f"  - {error}")
+
+            print("=" * 70)
+            self._print_success(f"Full analysis completed for {ticker}!")
+
+            return results
+
 
 # Legacy class for backward compatibility
 class StockAnalysis(AdvancedStockAnalysis):
@@ -1661,6 +1906,304 @@ class StockAnalysis(AdvancedStockAnalysis):
             else:
                 self._print_warning("No data files found.")
 
+    def full_analysis(self, ticker, period="1y", verbose=False, json_output=False):
+        """
+        Run all available analysis commands sequentially for a single ticker
+        and return a consensus recommendation (BUY, SELL, or HOLD).
+
+        Args:
+            ticker (str): Stock ticker symbol
+            period (str): Time period for analysis
+            verbose (bool): Output individual analysis results
+            json_output (bool): Return results as JSON
+
+        Returns:
+            dict: Full analysis results with consensus recommendation
+        """
+        if not json_output:
+            self._print_header(f"FULL ANALYSIS FOR {ticker}", "🎯")
+            print(f"Running all available analysis commands...")
+            print(f"Period: {period}")
+            print(f"Verbose: {verbose}")
+            print()
+
+        results = {
+            'ticker': ticker,
+            'period': period,
+            'timestamp': datetime.now().isoformat(),
+            'analyses': {},
+            'consensus': None,
+            'recommendations': {},
+            'errors': []
+        }
+
+        # 1. Download data first
+        if not json_output:
+            print("📥 Step 1/8: Downloading data...")
+        try:
+            download_result = self.downloader.download_multiple_stocks([ticker], None, None, period)
+            if download_result and download_result.get(ticker):
+                results['analyses']['download'] = {'status': 'success'}
+                if verbose and not json_output:
+                    print("✅ Data download completed")
+            else:
+                results['errors'].append('Data download failed')
+                if not json_output:
+                    self._print_error("Data download failed")
+        except Exception as e:
+            results['errors'].append(f'Download error: {str(e)}')
+            if not json_output:
+                self._print_error(f"Download error: {str(e)}")
+
+        # 2. Comprehensive Analysis
+        if not json_output:
+            print("\n🔬 Step 2/8: Running comprehensive analysis...")
+        try:
+            comp_result = self.comprehensive_analysis(
+                [ticker], period, download=False,
+                include_patterns=True, include_events=True,
+                include_advanced_viz=False, include_options=True,
+                include_investment_advice=True, include_seasonal=True,
+                json_output=True
+            )
+            results['analyses']['comprehensive'] = comp_result
+
+            # Extract recommendation
+            if comp_result and isinstance(comp_result, dict):
+                recs = comp_result.get('recommendations', {})
+                if ticker in recs:
+                    rec_data = recs[ticker]
+                    if isinstance(rec_data, dict):
+                        rec = rec_data.get('overall_recommendation', 'UNKNOWN')
+                    else:
+                        rec = rec_data
+                    results['recommendations']['comprehensive'] = rec
+                    if verbose and not json_output:
+                        print(f"  Recommendation: {rec}")
+                        if isinstance(rec_data, dict):
+                            conf = rec_data.get('confidence_level', 'N/A')
+                            print(f"  Confidence: {conf}")
+        except Exception as e:
+            results['errors'].append(f'Comprehensive analysis error: {str(e)}')
+            if verbose and not json_output:
+                self._print_warning(f"Comprehensive analysis error: {str(e)}")
+
+        # 3. Seasonal Analysis
+        if not json_output:
+            print("\n🗓️ Step 3/8: Running seasonal analysis...")
+        try:
+            seasonal_result = self.seasonal_only([ticker], period="5y", download=False, json_output=True)
+            results['analyses']['seasonal'] = seasonal_result
+
+            # Extract recommendation from seasonal
+            if seasonal_result and isinstance(seasonal_result, dict):
+                seasonal_recs = seasonal_result.get('recommendations', {})
+                if ticker in seasonal_recs:
+                    results['recommendations']['seasonal'] = seasonal_recs[ticker]
+                    if verbose and not json_output:
+                        print(f"  Recommendation: {seasonal_recs[ticker]}")
+        except Exception as e:
+            results['errors'].append(f'Seasonal analysis error: {str(e)}')
+            if verbose and not json_output:
+                self._print_warning(f"Seasonal analysis error: {str(e)}")
+
+        # 4. Pattern Analysis
+        if not json_output:
+            print("\n🔍 Step 4/8: Running pattern analysis...")
+        try:
+            files = self.visualizer.find_stock_files(ticker)
+            if files:
+                latest_file = max(files, key=os.path.getctime)
+                data = self.visualizer.load_stock_data(latest_file)
+                if data is not None:
+                    pattern_result = self.pattern_analyzer.detect_patterns({ticker: data})
+                    results['analyses']['patterns'] = pattern_result
+                    if verbose and not json_output:
+                        if pattern_result and ticker in pattern_result:
+                            patterns = pattern_result[ticker]
+                            print(f"  Patterns detected: {len(patterns)} patterns")
+        except Exception as e:
+            results['errors'].append(f'Pattern analysis error: {str(e)}')
+            if verbose and not json_output:
+                self._print_warning(f"Pattern analysis error: {str(e)}")
+
+        # 5. Multi-timeframe Analysis
+        if not json_output:
+            print("\n📊 Step 5/8: Running multi-timeframe analysis...")
+        try:
+            mtf_result = self.analyze_multi_timeframe(ticker)
+            results['analyses']['multi_timeframe'] = mtf_result
+
+            if mtf_result and 'consensus' in mtf_result:
+                consensus = mtf_result['consensus']
+                results['recommendations']['multi_timeframe'] = consensus
+                if verbose and not json_output:
+                    print(f"  Consensus: {consensus}")
+                    print(f"  Confidence: {mtf_result.get('confidence', 'N/A')}")
+        except Exception as e:
+            results['errors'].append(f'Multi-timeframe analysis error: {str(e)}')
+            if verbose and not json_output:
+                self._print_warning(f"Multi-timeframe analysis error: {str(e)}")
+
+        # 6. ML Analysis (if available)
+        if not json_output:
+            print("\n🤖 Step 6/8: Running ML analysis...")
+        if self.ml_analyzer:
+            try:
+                files = self.visualizer.find_stock_files(ticker)
+                if files:
+                    latest_file = max(files, key=os.path.getctime)
+                    data = self.visualizer.load_stock_data(latest_file)
+                    if data is not None and len(data) >= 100:
+                        ml_result = self.ml_analyzer.analyze(data, ticker)
+                        if ml_result:
+                            results['analyses']['ml'] = {
+                                'recommendation': ml_result.recommendation.action,
+                                'confidence': ml_result.recommendation.confidence,
+                                'predicted_return': ml_result.recommendation.predicted_return_pct,
+                                'risk_score': ml_result.recommendation.risk_score
+                            }
+                            results['recommendations']['ml'] = ml_result.recommendation.action
+                            if verbose and not json_output:
+                                print(f"  Recommendation: {ml_result.recommendation.action}")
+                                print(f"  Confidence: {ml_result.recommendation.confidence:.1f}")
+                    else:
+                        if verbose and not json_output:
+                            print("  Insufficient data for ML analysis")
+            except Exception as e:
+                results['errors'].append(f'ML analysis error: {str(e)}')
+                if verbose and not json_output:
+                    self._print_warning(f"ML analysis error: {str(e)}")
+        else:
+            if verbose and not json_output:
+                print("  ML analyzer not available")
+
+        # 7. RNN Analysis (if available)
+        if not json_output:
+            print("\n🧠 Step 7/8: Running RNN analysis...")
+        if self.rnn_analyzer:
+            try:
+                files = self.visualizer.find_stock_files(ticker)
+                if files:
+                    latest_file = max(files, key=os.path.getctime)
+                    data = self.visualizer.load_stock_data(latest_file)
+                    if data is not None and len(data) >= 100:
+                        rnn_result = self.rnn_analyzer.analyze(data, ticker)
+                        if rnn_result:
+                            results['analyses']['rnn'] = {
+                                'recommendation': rnn_result.recommendation.action,
+                                'confidence': rnn_result.recommendation.confidence,
+                                'predicted_return': rnn_result.recommendation.predicted_return_pct
+                            }
+                            results['recommendations']['rnn'] = rnn_result.recommendation.action
+                            if verbose and not json_output:
+                                print(f"  Recommendation: {rnn_result.recommendation.action}")
+                                print(f"  Confidence: {rnn_result.recommendation.confidence:.1f}")
+                    else:
+                        if verbose and not json_output:
+                            print("  Insufficient data for RNN analysis")
+            except Exception as e:
+                results['errors'].append(f'RNN analysis error: {str(e)}')
+                if verbose and not json_output:
+                    self._print_warning(f"RNN analysis error: {str(e)}")
+        else:
+            if verbose and not json_output:
+                print("  RNN analyzer not available")
+
+        # 8. Options Analysis
+        if not json_output:
+            print("\n📈 Step 8/8: Running options analysis...")
+        try:
+            options_result = self.options_analyzer.analyze_options_with_greeks(ticker)
+            if options_result:
+                results['analyses']['options'] = options_result
+                if verbose and not json_output:
+                    print(f"  Options data retrieved")
+        except Exception as e:
+            results['errors'].append(f'Options analysis error: {str(e)}')
+            if verbose and not json_output:
+                self._print_warning(f"Options analysis error: {str(e)}")
+
+        # Calculate consensus recommendation
+        if not json_output:
+            print("\n🎯 Calculating consensus recommendation...")
+
+        recommendations = results['recommendations']
+        buy_count = 0
+        sell_count = 0
+        hold_count = 0
+
+        for analysis_type, rec in recommendations.items():
+            rec_upper = str(rec).upper()
+            if 'BUY' in rec_upper or 'BULLISH' in rec_upper:
+                buy_count += 1
+            elif 'SELL' in rec_upper or 'BEARISH' in rec_upper:
+                sell_count += 1
+            elif 'HOLD' in rec_upper or 'NEUTRAL' in rec_upper:
+                hold_count += 1
+
+        total_recs = buy_count + sell_count + hold_count
+
+        if total_recs == 0:
+            consensus = 'INSUFFICIENT_DATA'
+            confidence = 0
+        else:
+            # Determine consensus
+            max_count = max(buy_count, sell_count, hold_count)
+            consensus_pct = (max_count / total_recs) * 100
+
+            if buy_count == max_count:
+                consensus = 'BUY'
+            elif sell_count == max_count:
+                consensus = 'SELL'
+            else:
+                consensus = 'HOLD'
+
+            # Determine confidence
+            if consensus_pct >= 75:
+                confidence = 'HIGH'
+            elif consensus_pct >= 60:
+                confidence = 'MEDIUM'
+            else:
+                confidence = 'LOW'
+
+        results['consensus'] = {
+            'recommendation': consensus,
+            'confidence': confidence,
+            'buy_count': buy_count,
+            'sell_count': sell_count,
+            'hold_count': hold_count,
+            'total_analyses': total_recs,
+            'agreement_pct': round((max_count / total_recs * 100) if total_recs > 0 else 0, 1)
+        }
+
+        # Output results
+        if json_output:
+            return results
+        else:
+            print("\n" + "=" * 60)
+            self._print_header(f"CONSENSUS RECOMMENDATION FOR {ticker}", "🎯")
+            print(f"{'Recommendation:':<20} {consensus}")
+            print(f"{'Confidence:':<20} {confidence}")
+            print(f"{'Agreement:':<20} {results['consensus']['agreement_pct']:.1f}%")
+            print()
+            print(f"{'Analysis Type':<25} {'Recommendation':<15}")
+            print("-" * 50)
+            for analysis_type, rec in recommendations.items():
+                print(f"{analysis_type.capitalize():<25} {rec:<15}")
+            print()
+            print(f"Summary: {buy_count} BUY, {sell_count} SELL, {hold_count} HOLD")
+
+            if results['errors']:
+                print("\n⚠️  Warnings/Errors:")
+                for error in results['errors']:
+                    print(f"  - {error}")
+
+            print("\n" + "=" * 60)
+            self._print_success(f"Full analysis completed for {ticker}!")
+
+            return results
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1672,6 +2215,12 @@ def main():
 📊 QUICK ANALYSIS (Basic):
   ./clarifi.sh quick PLTR QBTS
   ./clarifi.sh quick AAPL MSFT --period 6mo
+
+🎯 FULL ANALYSIS (All Commands with Consensus):
+  ./clarifi.sh full AAPL
+  ./clarifi.sh full AAPL --period 6mo
+  ./clarifi.sh full TSLA --verbose
+  ./clarifi.sh full MSFT --verbose --period 1y
 
 🔬 COMPREHENSIVE ANALYSIS (Advanced):
   ./clarifi.sh analyze PLTR QBTS AAPL --period 1y
@@ -1864,6 +2413,12 @@ def main():
     quick_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
     quick_parser.add_argument('--no-download', action='store_true', help='Skip downloading')
     quick_parser.add_argument('--no-visualize', action='store_true', help='Skip visualization')
+
+    # NEW: Full analysis with consensus recommendation
+    full_parser = subparsers.add_parser('full', help='🎯 Run all analyses and generate consensus recommendation')
+    full_parser.add_argument('ticker', help='Stock ticker symbol (single ticker only)')
+    full_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
+    full_parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output from each analysis')
 
     # NEW: Comprehensive analysis
     analyze_parser = subparsers.add_parser('analyze', help='🔬 Comprehensive market analysis')
@@ -2185,6 +2740,18 @@ def main():
                 download=not args.no_download,
                 visualize=not args.no_visualize
             )
+
+        elif args.command == 'full':
+            # Full analysis with consensus recommendation
+            result = analysis.full_analysis(
+                args.ticker,
+                period=args.period,
+                verbose=args.verbose,
+                json_output=getattr(args, 'json', False)
+            )
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'analyze':
             # Lazy initialize engine if needed for portfolio lookup
