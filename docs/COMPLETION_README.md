@@ -7,16 +7,19 @@ This directory contains tab completion scripts for ClariFi commands, making it e
 ### Automatic Installation
 
 1. **Install for your current shell:**
+
    ```bash
    ./setup_completion.sh --install
    ```
 
 2. **Install for all shells (bash and zsh):**
+
    ```bash
    ./setup_completion.sh --all
    ```
 
 3. **Activate in current session:**
+
    ```bash
    # For zsh
    source ~/.zshrc
@@ -30,18 +33,21 @@ This directory contains tab completion scripts for ClariFi commands, making it e
 #### For Zsh (recommended for macOS)
 
 1. Copy the completion file:
+
    ```bash
    mkdir -p ~/.local/share/zsh/site-functions
    cp _clarifi_completion.zsh ~/.local/share/zsh/site-functions/_clarifi
    ```
 
 2. Add to your `~/.zshrc`:
+
    ```bash
    echo 'fpath=(~/.local/share/zsh/site-functions $fpath)' >> ~/.zshrc
    echo 'autoload -U compinit && compinit' >> ~/.zshrc
    ```
 
 3. Reload your shell:
+
    ```bash
    source ~/.zshrc
    ```
@@ -49,17 +55,20 @@ This directory contains tab completion scripts for ClariFi commands, making it e
 #### For Bash
 
 1. Copy the completion file:
+
    ```bash
    mkdir -p ~/.local/share/bash-completion/completions
    cp _clarifi_completion.bash ~/.local/share/bash-completion/completions/clarifi
    ```
 
 2. Add to your `~/.bashrc`:
+
    ```bash
    echo 'source ~/.local/share/bash-completion/completions/clarifi' >> ~/.bashrc
    ```
 
 3. Reload your shell:
+
    ```bash
    source ~/.bashrc
    ```
@@ -67,7 +76,9 @@ This directory contains tab completion scripts for ClariFi commands, making it e
 ## Features
 
 ### Main Commands Completion
-Type `./run.sh ` and press TAB to see all available commands:
+
+Type `./run.sh` and press TAB to see all available commands:
+
 - `quick` - Quick basic analysis
 - `analyze` - Comprehensive market analysis
 - `seasonal` - Seasonal & holiday analysis
@@ -86,6 +97,7 @@ Type `./run.sh ` and press TAB to see all available commands:
 ### Command-Specific Completion
 
 #### Analyze Command
+
 ```bash
 ./run.sh analyze [TAB]
 # Completes with:
@@ -94,31 +106,37 @@ Type `./run.sh ` and press TAB to see all available commands:
 ```
 
 #### Portfolio Subcommands
+
 ```bash
 ./run.sh portfolio [TAB]
 # Completes with: create, list, add, remove, tickers, analyze, history, accuracy
 ```
 
 #### Screen Categories
+
 ```bash
 ./run.sh screen [TAB]
 # Completes with: gainers, losers, actives, new
 ```
 
 #### Period Values
+
 ```bash
 ./run.sh analyze AAPL --period [TAB]
 # Completes with: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
 ```
 
 #### Ticker Symbols
+
 Common ticker symbols are provided for completion:
+
 - Tech: AAPL, MSFT, GOOGL, GOOG, AMZN, TSLA, NVDA, META
 - Others: PLTR, QBTS, NIO, SAAB, NFLX, PYPL, ADBE, CRM, etc.
 
 ### Completion for Python Script
 
 Tab completion also works when calling the Python script directly:
+
 ```bash
 python3 core/main.py [TAB]
 # Same completion as ./run.sh
@@ -127,6 +145,7 @@ python3 core/main.py [TAB]
 ## Examples
 
 ### Basic Usage
+
 ```bash
 ./run.sh ana[TAB]           # → ./run.sh analyze
 ./run.sh analyze --pe[TAB]  # → ./run.sh analyze --period
@@ -134,6 +153,7 @@ python3 core/main.py [TAB]
 ```
 
 ### Advanced Usage
+
 ```bash
 ./run.sh portfolio [TAB]              # Shows portfolio subcommands
 ./run.sh portfolio create --na[TAB]   # → --name
@@ -143,12 +163,14 @@ python3 core/main.py [TAB]
 ## Testing
 
 Test your completion setup:
+
 ```bash
 ./test_completion.sh
 ```
 
 Or manually test:
-1. Type `./run.sh ` and press TAB twice - should show all commands
+
+1. Type `./run.sh` and press TAB twice - should show all commands
 2. Type `./run.sh ana` and press TAB - should complete to `analyze`
 3. Type `./run.sh analyze --pe` and press TAB - should complete to `--period`
 
@@ -157,6 +179,7 @@ Or manually test:
 ### Completion Not Working
 
 1. **Check if completion is loaded:**
+
    ```bash
    # For zsh
    compdef -d clarifi
@@ -166,6 +189,7 @@ Or manually test:
    ```
 
 2. **Reload shell configuration:**
+
    ```bash
    # For zsh
    source ~/.zshrc
@@ -175,6 +199,7 @@ Or manually test:
    ```
 
 3. **Re-run setup:**
+
    ```bash
    ./setup_completion.sh --install
    ```
@@ -182,6 +207,7 @@ Or manually test:
 ### Remove Completion
 
 To remove tab completion:
+
 ```bash
 ./setup_completion.sh --remove
 ```

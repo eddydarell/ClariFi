@@ -15,6 +15,34 @@ import calendar
 import numpy as np
 from datetime import datetime, timedelta
 
+# Initialize colorama for cross-platform colored output
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    from colorama import Fore, Back, Style
+    HAS_COLORAMA = True
+except ImportError:
+    # Fallback if colorama not available
+    class Fore:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+        MAGENTA = ''
+        CYAN = ''
+        WHITE = ''
+        BLACK = ''
+    class Back:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+    class Style:
+        BRIGHT = ''
+        DIM = ''
+        NORMAL = ''
+    HAS_COLORAMA = False
+
 # Add the current directory to path to import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -159,27 +187,27 @@ class AdvancedStockAnalysis:
 
     def _print_header(self, title, emoji="🚀"):
         """Print a consistent header for all analysis types."""
-        print(f"{emoji} ClariFi: Clarify your Finances")
-        print("=" * 50)
-        print(f"{emoji} === {title.upper()} === {emoji}")
-        print("=" * 50)
+        print(f"{Fore.CYAN}ClariFi: Clarify your Finances{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'=' * 50}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}=== {title.upper()} ==={Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'=' * 50}{Style.RESET_ALL}")
 
     def _print_section_header(self, title, emoji="📊"):
         """Print a consistent section header."""
-        print(f"\n{emoji} {title.upper()}:")
-        print("-" * 40)
+        print(f"\n{Fore.YELLOW}{title.upper()}:{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'-' * 40}{Style.RESET_ALL}")
 
     def _print_subsection(self, title, emoji="  "):
         """Print a consistent subsection."""
-        print(f"{emoji} {title}:")
+        print(f"{Fore.CYAN}{title}:{Style.RESET_ALL}")
 
     def _print_success(self, message):
         """Print a success message."""
-        print(f"✅ {message}")
+        print(f"{Fore.GREEN}✓ {message}{Style.RESET_ALL}")
 
     def _print_error(self, message):
         """Print an error message."""
-        print(f"❌ {message}")
+        print(f"{Fore.RED}✗ {message}{Style.RESET_ALL}")
 
     def _print_warning(self, message):
         """Print a warning message."""
@@ -2208,198 +2236,55 @@ class StockAnalysis(AdvancedStockAnalysis):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='🚀 ClariFi: Clarify your Finances - Advanced Market Intelligence & Pattern Analysis Tool 🚀',
+        description=f'{Fore.CYAN}ClariFi: Clarify your Finances{Style.RESET_ALL}\n'
+                   f'{Fore.GREEN}Advanced Market Intelligence & Pattern Analysis Tool{Style.RESET_ALL}\n\n'
+                   f'Orchestrates stock data downloading and comprehensive financial analysis.\n'
+                   f'Provides an easy-to-use interface for stock analysis with seasonal patterns,\n'
+                   f'event correlation, options analysis, and investment suggestions.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-🎯 ADVANCED MARKET ANALYSIS EXAMPLES:
+        epilog=f"""
+{Fore.YELLOW}EXAMPLES:{Style.RESET_ALL}
 
-📊 QUICK ANALYSIS (Basic):
+{Fore.GREEN}QUICK ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh quick PLTR QBTS
   ./clarifi.sh quick AAPL MSFT --period 6mo
 
-🎯 FULL ANALYSIS (All Commands with Consensus):
+{Fore.GREEN}FULL ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh full AAPL
-  ./clarifi.sh full AAPL --period 6mo
-  ./clarifi.sh full TSLA --verbose
-  ./clarifi.sh full MSFT --verbose --period 1y
+  ./clarifi.sh full AAPL --period 6mo --verbose
 
-🔬 COMPREHENSIVE ANALYSIS (Advanced):
+{Fore.GREEN}COMPREHENSIVE ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh analyze PLTR QBTS AAPL --period 1y
   ./clarifi.sh analyze "SAAB B" NANEXA --period 6mo --no-events
-  ./clarifi.sh analyze <portfolio_id_or_name> --period 1y --include-deep
-  ./clarifi.sh analyze MyPortfolio --period 6mo --summary-only
-  ./clarifi.sh analyze AAPL --no-patterns --no-advanced-viz  # Minimal analysis
-  ./clarifi.sh analyze TSLA --no-seasonal --no-investment-advice
+  ./clarifi.sh analyze AAPL --no-patterns --no-advanced-viz
 
-🔁 DEEP BACKTESTING ANALYSIS:
-  ./clarifi.sh analyze AAPL MSFT --period 5y --include-deep
-  ./clarifi.sh analyze PLTR --period 3y --include-deep --deep-chunk-months 6
-  ./clarifi.sh analyze <portfolio_id> --include-deep --deep-chunk-months 3
-
-📈 PATTERN ANALYSIS:
+{Fore.GREEN}PATTERN ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh patterns AAPL MSFT GOOGL --period 2y
-  ./clarifi.sh correlations PLTR QBTS --window 30
 
-📰 EVENT CORRELATION:
+{Fore.GREEN}EVENT CORRELATION:{Style.RESET_ALL}
   ./clarifi.sh events PLTR QBTS --period 1y
-  ./clarifi.sh events AAPL --lookback 7 --lookahead 7
 
-🎨 ADVANCED VISUALIZATIONS:
-  ./clarifi.sh visualize PLTR --support-resistance
-  ./clarifi.sh volatility AAPL MSFT --clustering
-
-📋 DATA MANAGEMENT:
-  ./clarifi.sh download PLTR QBTS --period 6mo
-  ./clarifi.sh info PLTR QBTS "SAAB B"
-  ./clarifi.sh list
-
-📡 LIVE MONITORING:
+{Fore.GREEN}LIVE MONITORING:{Style.RESET_ALL}
   ./clarifi.sh live AAPL MSFT TSLA
-  ./clarifi.sh live PLTR QBTS --interval 10
-  ./clarifi.sh live AAPL --no-graphs --interval 3
+  ./clarifi.sh live PLTR --interval 10
 
-📊 MARKET SCREENING:
+{Fore.GREEN}MARKET SCREENING:{Style.RESET_ALL}
   ./clarifi.sh screen gainers
   ./clarifi.sh screen losers --limit 10
-  ./clarifi.sh screen actives --limit 30
-  ./clarifi.sh screen new
 
-🗓️ SEASONAL ANALYSIS:
+{Fore.GREEN}SEASONAL ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh seasonal AAPL MSFT --period 5y
-  ./clarifi.sh seasonal PLTR --period 3y --no-download
 
-🤖 MACHINE LEARNING ANALYSIS:
-  ./clarifi.sh ml_analyze AAPL --period 2y --horizon 5
-  ./clarifi.sh ml_analyze AAPL MSFT --models random_forest xgboost --horizon 10
-  ./clarifi.sh analyze AAPL --include-ml --period 1y  # ML in comprehensive analysis
+{Fore.GREEN}AI ANALYSIS:{Style.RESET_ALL}
+  ./clarifi.sh ai AAPL MSFT --period 6mo
+  ./clarifi.sh ai PLTR --show-prompt
 
-🧠 RECURRENT NEURAL NETWORK ANALYSIS:
-  ./clarifi.sh rnn AAPL --period 2y --horizon 5
-  ./clarifi.sh rnn AAPL MSFT --models lstm gru --horizon 10
-  ./clarifi.sh rnn TSLA --models bidirectional_lstm --period 1y
+{Fore.GREEN}PORTFOLIO MANAGEMENT:{Style.RESET_ALL}
+  ./clarifi.sh portfolio create --name MyPortfolio
+  ./clarifi.sh portfolio list
+  ./clarifi.sh portfolio add <portfolio_id> AAPL --quantity 10
 
-🔄 TRANSFORMER ANALYSIS:
-  ./clarifi.sh transformer AAPL --period 2y --horizon 5
-  ./clarifi.sh transformer AAPL MSFT --models tft transformer_encoder --horizon 10
-  ./clarifi.sh transformer NVDA --models conv_transformer --period 1y
-
-🎮 REINFORCEMENT LEARNING ANALYSIS:
-  ./clarifi.sh rl AAPL --period 2y --episodes 1000
-  ./clarifi.sh rl AAPL MSFT --models ppo dqn --episodes 2000 --backtest
-  ./clarifi.sh rl TSLA --models q_learning --period 1y
-
-🎯 MARKET INTELLIGENCE FEATURES:
-  ✅ Automated data quality validation (price anomalies, gaps, inconsistencies)
-  ✅ Enhanced technical indicators (RSI 14/30, MACD with signal, BB width)
-  ✅ Advanced risk metrics (Sharpe, Sortino, Calmar, VaR, CVaR, Max Drawdown)
-  ✅ Market regime detection (Trending/Ranging/Volatile with confidence)
-  ✅ Multi-timeframe trend analysis (1mo, 3mo, 6mo, 1y consensus)
-  ✅ Correlation pattern detection
-  ✅ Leading indicator identification
-  ✅ Volatility clustering analysis
-  ✅ Support/resistance level detection
-  ✅ Event impact correlation
-  ✅ Trend strength analysis
-  ✅ Unusual movement detection
-  ✅ Black-Scholes options analysis
-  ✅ Risk assessment and prediction
-  ✅ Investment suggestion engine
-  ✅ Portfolio-level recommendations
-  ✅ Deep backtesting & accuracy analysis
-  ✅ Real-time live monitoring with terminal graphs
-  ✅ Market screening for gainers, losers, and new listings
-  ✅ Seasonal pattern analysis with holiday effects
-  ✅ Machine Learning analysis (Random Forest, XGBoost, LightGBM)
-  ✅ Recurrent Neural Network analysis (LSTM, GRU, Bidirectional)
-  ✅ Transformer-based analysis (TFT, Attention mechanisms)
-  ✅ Reinforcement Learning analysis (Q-Learning, PPO, DQN)
-
-⚖️ OPTIONS & RISK ANALYSIS:
-  ./clarifi.sh analyze AAPL MSFT --period 1y  # Full analysis with options
-  ./clarifi.sh analyze PLTR --no-options      # Skip options analysis
-
-📊 ENHANCED ANALYSIS FEATURES (NEW):
-  ✓ Automated Data Quality Validation
-    - Detects price anomalies (>50% single-day moves)
-    - Identifies missing data and suspicious gaps
-    - Validates volume consistency
-    - Checks for data integrity issues
-
-  ✓ Advanced Technical Indicators
-    - RSI (14 & 30 period) with overbought/oversold signals
-    - MACD with signal line and histogram crossovers
-    - Bollinger Bands with volatility regime classification
-    - Enhanced ADX for trend strength measurement
-
-  ✓ Comprehensive Risk Metrics
-    - Sharpe Ratio (risk-adjusted returns)
-    - Sortino Ratio (downside risk focus)
-    - Calmar Ratio (drawdown-adjusted returns)
-    - VaR & CVaR (95% confidence)
-    - Maximum Drawdown percentage
-    - Annual volatility and returns
-
-  ✓ Market Regime Detection
-    - TRENDING: Strong directional moves (use trend-following)
-    - RANGING: Sideways consolidation (use mean reversion)
-    - VOLATILE: High uncertainty (reduce position sizes)
-    - Confidence levels: HIGH/MEDIUM/LOW
-    - Strategy recommendations based on regime
-
-  ✓ Multi-Timeframe Analysis
-    - Analyzes 1mo, 3mo, 6mo, 1y trends
-    - Provides consensus: BULLISH/BEARISH/NEUTRAL
-    - Confidence scoring across timeframes
-
-💰 INVESTMENT SUGGESTIONS:
-  ./clarifi.sh analyze AAPL TSLA MSFT         # Get BUY/SELL/HOLD advice
-  ./clarifi.sh analyze PLTR --no-investment-advice  # Skip suggestions
-
-🤖 AI-POWERED ANALYSIS (LLM + Quantitative):
-  ./clarifi.sh ai AAPL MSFT --period 6mo      # AI recommendations with backtest
-  ./clarifi.sh ai PLTR TSLA --no-llm          # Quantitative metrics only
-  ./clarifi.sh ai AAPL --show-prompt          # Show LLM prompt for transparency
-  ./clarifi.sh ai <portfolio_id> --period 1y  # Analyze entire portfolio
-  ./clarifi.sh ai NVDA --model qwen2:7b       # Use specific Ollama model
-
-📡 ALPHA VANTAGE API INTEGRATION:
-  ./clarifi.sh av news-sentiment AAPL MSFT --limit 20
-  ./clarifi.sh av news-sentiment --topics technology finance --analyze
-  ./clarifi.sh av overview TSLA
-  ./clarifi.sh av quote NVDA
-  ./clarifi.sh av income-statement AAPL --annual
-  ./clarifi.sh av balance-sheet MSFT --quarterly
-  ./clarifi.sh av cash-flow GOOGL --annual
-  ./clarifi.sh av earnings GOOGL
-  ./clarifi.sh av top-gainers-losers --format table
-
-📥 EVENT DATA INGESTION:
-  ./clarifi.sh ingest --file events.json
-  ./clarifi.sh ingest --process
-  ./clarifi.sh ingest --monitor --interval 60
-
-📁 PORTFOLIO MANAGEMENT:
-    ./clarifi.sh portfolio create --name MyPortfolio --description "Core holdings"
-    ./clarifi.sh portfolio list
-    ./clarifi.sh portfolio info <portfolio_id_or_name>
-    ./clarifi.sh portfolio info <portfolio_id_or_name> --analytics
-    ./clarifi.sh portfolio add <portfolio_id> AAPL --quantity 10 --avg-cost 150
-    ./clarifi.sh portfolio update-ticker <portfolio_id> AAPL --quantity 15 --avg-cost 175
-    ./clarifi.sh portfolio update <portfolio_id> --name "New Name" --description "Updated"
-    ./clarifi.sh portfolio sync <portfolio_id>  # Update current prices
-    ./clarifi.sh portfolio tickers <portfolio_id>
-    ./clarifi.sh portfolio analyze <portfolio_id> --period 6mo --include-deep
-    ./clarifi.sh portfolio analyze <portfolio_id> --summary-only
-    ./clarifi.sh portfolio remove <portfolio_id> AAPL
-    ./clarifi.sh portfolio delete <portfolio_id> --confirm-name "Exact Portfolio Name"
-    ./clarifi.sh portfolio history --portfolio-id <portfolio_id> --limit 5
-    ./clarifi.sh portfolio accuracy --portfolio-id <portfolio_id>
-
-📊 PORTFOLIO ANALYSIS (Simplified):
-    ./clarifi.sh analyze <portfolio_id_or_name> --period 1y
-    ./clarifi.sh analyze MyPortfolio --include-deep --deep-chunk-months 3
-
-�💡 TIP: Use quotes for tickers with spaces: "SAAB B"
+{Fore.BLUE}TIP:{Style.RESET_ALL} Use quotes for tickers with spaces: "SAAB B"
         """
     )
 
@@ -2409,20 +2294,20 @@ def main():
     subparsers = parser.add_subparsers(dest='command', help='Analysis Commands')
 
     # Legacy quick analysis
-    quick_parser = subparsers.add_parser('quick', help='🚀 Quick basic analysis (legacy)')
+    quick_parser = subparsers.add_parser('quick', help='Quick basic analysis (legacy)')
     quick_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     quick_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
     quick_parser.add_argument('--no-download', action='store_true', help='Skip downloading')
     quick_parser.add_argument('--no-visualize', action='store_true', help='Skip visualization')
 
     # NEW: Full analysis with consensus recommendation
-    full_parser = subparsers.add_parser('full', help='🎯 Run all analyses and generate consensus recommendation')
+    full_parser = subparsers.add_parser('full', help='Run all analyses and generate consensus recommendation')
     full_parser.add_argument('ticker', help='Stock ticker symbol (single ticker only)')
     full_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
     full_parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output from each analysis')
 
     # NEW: Comprehensive analysis
-    analyze_parser = subparsers.add_parser('analyze', help='🔬 Comprehensive market analysis')
+    analyze_parser = subparsers.add_parser('analyze', help='Comprehensive market analysis')
     analyze_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols or portfolio ID')
     analyze_parser.add_argument('--period', '-p', default='1y', help='Time period (default: 1y)')
     analyze_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
@@ -2440,7 +2325,7 @@ def main():
     # AI analysis (LLM powered)
     ai_parser = subparsers.add_parser(
         'ai',
-        help='🤖 AI-driven quantitative + LLM recommendations (BUY/SELL/HOLD)',
+        help='AI-driven quantitative + LLM recommendations (BUY/SELL/HOLD)',
         description='Run quantitative factor extraction + optional local LLM synthesis to produce BUY/SELL/HOLD signals.',
         epilog=(
             "Examples:\n"
@@ -2494,7 +2379,7 @@ def main():
     strategy_parser.add_argument('--optimum', action='store_true', help='Find optimal buy/sell moment based on all analysis data')
 
     # ML analysis
-    ml_parser = subparsers.add_parser('ml_analyze', help='🤖 Machine Learning analysis with Random Forest, XGBoost, LightGBM')
+    ml_parser = subparsers.add_parser('ml_analyze', help='Machine Learning analysis with Random Forest, XGBoost, LightGBM')
     ml_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     ml_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for ML training)')
     ml_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
@@ -2503,7 +2388,7 @@ def main():
                           default=['random_forest', 'xgboost', 'lightgbm'], help='ML models to use')
 
     # RNN analysis
-    rnn_parser = subparsers.add_parser('rnn', help='🧠 Recurrent Neural Network analysis with LSTM/GRU')
+    rnn_parser = subparsers.add_parser('rnn', help='Recurrent Neural Network analysis with LSTM/GRU')
     rnn_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     rnn_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for RNN training)')
     rnn_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
@@ -2512,7 +2397,7 @@ def main():
                            default=['lstm', 'gru'], help='RNN models to use')
 
     # Transformer analysis
-    transformer_parser = subparsers.add_parser('transformer', help='🔄 Transformer-based analysis with TFT and attention mechanisms')
+    transformer_parser = subparsers.add_parser('transformer', help='Transformer-based analysis with TFT and attention mechanisms')
     transformer_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     transformer_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for transformer training)')
     transformer_parser.add_argument('--horizon', type=int, default=5, help='Prediction horizon in days (default: 5)')
@@ -2521,7 +2406,7 @@ def main():
                                    default=['tft'], help='Transformer models to use')
 
     # RL analysis
-    rl_parser = subparsers.add_parser('rl', help='🎮 Reinforcement Learning analysis with Q-Learning and PPO')
+    rl_parser = subparsers.add_parser('rl', help='Reinforcement Learning analysis with Q-Learning and PPO')
     rl_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     rl_parser.add_argument('--period', '-p', default='2y', help='Time period (default: 2y for RL training)')
     rl_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
@@ -2531,40 +2416,40 @@ def main():
     rl_parser.add_argument('--backtest', action='store_true', help='Run backtesting after training')
 
     # Pattern analysis
-    patterns_parser = subparsers.add_parser('patterns', help='🔍 Advanced pattern analysis')
+    patterns_parser = subparsers.add_parser('patterns', help='Advanced pattern analysis')
     patterns_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     patterns_parser.add_argument('--period', '-p', default='1y', help='Time period')
     patterns_parser.add_argument('--window', '-w', type=int, default=30, help='Rolling window size')
 
     # Correlation analysis
-    corr_parser = subparsers.add_parser('correlations', help='📊 Correlation analysis')
+    corr_parser = subparsers.add_parser('correlations', help='Correlation analysis')
     corr_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols (min 2)')
     corr_parser.add_argument('--period', '-p', default='1y', help='Time period')
     corr_parser.add_argument('--window', '-w', type=int, default=30, help='Rolling window size')
 
     # Event correlation
-    events_parser = subparsers.add_parser('events', help='📰 Event correlation analysis')
+    events_parser = subparsers.add_parser('events', help='Event correlation analysis')
     events_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     events_parser.add_argument('--period', '-p', default='1y', help='Time period')
     events_parser.add_argument('--lookback', type=int, default=5, help='Days before event')
     events_parser.add_argument('--lookahead', type=int, default=5, help='Days after event')
 
     # Volatility analysis
-    vol_parser = subparsers.add_parser('volatility', help='🌊 Volatility clustering analysis')
+    vol_parser = subparsers.add_parser('volatility', help='Volatility clustering analysis')
     vol_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     vol_parser.add_argument('--period', '-p', default='1y', help='Time period')
     vol_parser.add_argument('--window', '-w', type=int, default=20, help='Volatility window')
     vol_parser.add_argument('--clustering', action='store_true', help='Create clustering plots')
 
     # Download command
-    download_parser = subparsers.add_parser('download', help='📥 Download stock data')
+    download_parser = subparsers.add_parser('download', help='Download stock data')
     download_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     download_parser.add_argument('--start', '-s', help='Start date (YYYY-MM-DD)')
     download_parser.add_argument('--end', '-e', help='End date (YYYY-MM-DD)')
     download_parser.add_argument('--period', '-p', help='Period (1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max)')
 
     # Visualize command
-    viz_parser = subparsers.add_parser('visualize', help='🎨 Create visualizations')
+    viz_parser = subparsers.add_parser('visualize', help='Create visualizations')
     viz_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
     viz_parser.add_argument('--single', action='store_true', help='Individual charts only')
     viz_parser.add_argument('--compare', action='store_true', help='Comparison chart')
@@ -2574,21 +2459,21 @@ def main():
     viz_parser.add_argument('--show', action='store_true', help='Show plots instead of saving')
 
     # Info command
-    info_parser = subparsers.add_parser('info', help='ℹ️ Show stock information')
+    info_parser = subparsers.add_parser('info', help='Show stock information')
     info_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
 
     # List command
-    list_parser = subparsers.add_parser('list', help='📋 List available data files')
+    list_parser = subparsers.add_parser('list', help='List available data files')
 
     # Live monitoring command
-    live_parser = subparsers.add_parser('live', help='📡 Live real-time stock monitoring')
+    live_parser = subparsers.add_parser('live', help='Live real-time stock monitoring')
     live_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols to monitor')
     live_parser.add_argument('--interval', '-i', type=int, default=5, help='Update interval in seconds (default: 5)')
     live_parser.add_argument('--no-graphs', action='store_true', help='Disable terminal graphs')
     live_parser.add_argument('--no-summary', action='store_true', help='Disable summary table')
 
     # Stock screener command
-    screener_parser = subparsers.add_parser('screen', help='📊 Market screening for gainers, losers, and new listings')
+    screener_parser = subparsers.add_parser('screen', help='Market screening for gainers, losers, and new listings')
     screener_parser.add_argument('category', choices=['gainers', 'losers', 'actives', 'new'],
                                 help='Screening category: gainers, losers, actives, or new')
     screener_parser.add_argument('--limit', '-l', type=int, default=20,
@@ -2596,7 +2481,7 @@ def main():
     screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
     # Portfolio management (grouped subcommands)
-    portfolio_parser = subparsers.add_parser('portfolio', help='📁 Portfolio management commands (create, list, info, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
+    portfolio_parser = subparsers.add_parser('portfolio', help='Portfolio management commands (create, list, info, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
     port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
 
     # portfolio create

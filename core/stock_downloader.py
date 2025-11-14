@@ -12,6 +12,34 @@ import sys
 from datetime import datetime, timedelta
 import argparse
 
+# Initialize colorama for cross-platform colored output
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    from colorama import Fore, Back, Style
+    HAS_COLORAMA = True
+except ImportError:
+    # Fallback if colorama not available
+    class Fore:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+        MAGENTA = ''
+        CYAN = ''
+        WHITE = ''
+        BLACK = ''
+    class Back:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+    class Style:
+        BRIGHT = ''
+        DIM = ''
+        NORMAL = ''
+    HAS_COLORAMA = False
+
 
 class StockDownloader:
     def __init__(self, data_dir="data"):
@@ -37,7 +65,7 @@ class StockDownloader:
             pandas.DataFrame: Stock data
         """
         try:
-            print(f"Downloading data for {ticker}...")
+            print(f"{Fore.BLUE}Downloading data for {ticker}...{Style.RESET_ALL}")
 
             if period:
                 data = yf.download(ticker, period=period)
@@ -45,7 +73,7 @@ class StockDownloader:
                 data = yf.download(ticker, start=start_date, end=end_date)
 
             if data.empty:
-                print(f"Warning: No data found for ticker {ticker}")
+                print(f"{Fore.YELLOW}Warning: No data found for ticker {ticker}{Style.RESET_ALL}")
                 return None
 
             # Flatten MultiIndex columns if present (happens with single ticker downloads)
@@ -289,7 +317,7 @@ def main():
         for ticker in args.tickers:
             info = downloader.get_stock_info(ticker)
             if info:
-                print(f"\n{ticker} - {info['longName']}")
+                print(f"\n{Fore.CYAN}{ticker} - {info['longName']}{Style.RESET_ALL}")
                 print(f"Sector: {info['sector']}")
                 print(f"Industry: {info['industry']}")
                 print(f"Market Cap: {info['marketCap']}")
@@ -303,7 +331,7 @@ def main():
         args.end = datetime.now().strftime("%Y-%m-%d")  # Today
 
     # Download data
-    print(f"\nDownloading data for: {', '.join(args.tickers)}")
+    print(f"\n{Fore.GREEN}Downloading data for: {', '.join(args.tickers)}{Style.RESET_ALL}")
 
     if args.period:
         print(f"Period: {args.period}")
@@ -317,10 +345,10 @@ def main():
         args.period
     )
 
-    print(f"\nDownload completed. Files saved:")
+    print(f"\n{Fore.GREEN}Download completed. Files saved:{Style.RESET_ALL}")
     for ticker, filepath in results.items():
         if filepath:
-            print(f"  {ticker}: {filepath}")
+            print(f"  {Fore.BLUE}{ticker}: {filepath}{Style.RESET_ALL}")
 
 
 if __name__ == "__main__":

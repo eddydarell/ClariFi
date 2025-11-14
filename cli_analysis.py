@@ -11,6 +11,34 @@ import sys
 from datetime import datetime
 from typing import List
 
+# Initialize colorama for cross-platform colored output
+try:
+    import colorama
+    colorama.init(autoreset=True)
+    from colorama import Fore, Back, Style
+    HAS_COLORAMA = True
+except ImportError:
+    # Fallback if colorama not available
+    class Fore:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+        MAGENTA = ''
+        CYAN = ''
+        WHITE = ''
+        BLACK = ''
+    class Back:
+        GREEN = ''
+        RED = ''
+        YELLOW = ''
+        BLUE = ''
+    class Style:
+        BRIGHT = ''
+        DIM = ''
+        NORMAL = ''
+    HAS_COLORAMA = False
+
 class ClariFiCLI:
     def __init__(self, base_url: str = "http://localhost:8181"):
         self.base_url = base_url
@@ -57,8 +85,8 @@ class ClariFiCLI:
             duration = (end_time - start_time).total_seconds()
 
             if verbose:
-                print(f"⏱️  Request completed in {duration:.2f} seconds")
-                print(f"📊 HTTP Status: {response.status_code}")
+                print(f"{Fore.BLUE}⏱️  Request completed in {duration:.2f} seconds{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}📊 HTTP Status: {response.status_code}{Style.RESET_ALL}")
 
             if response.status_code == 200:
                 return response.json()
@@ -74,31 +102,31 @@ class ClariFiCLI:
         """Format and display analysis results"""
 
         if "error" in result:
-            print(f"❌ Analysis failed: {result['error']}")
+            print(f"{Fore.RED}✗ Analysis failed: {result['error']}{Style.RESET_ALL}")
             return
 
-        print("\n📈 ANALYSIS SUMMARY")
-        print("-" * 40)
+        print(f"\n{Fore.YELLOW}ANALYSIS SUMMARY{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'-' * 40}{Style.RESET_ALL}")
         print(f"Success: {result.get('success', False)}")
         print(f"Execution Time: {result.get('execution_time', 'N/A'):.3f}s")
         print(f"Tickers Analyzed: {result.get('analyzed_tickers', 0)}")
         print(f"Timestamp: {result.get('timestamp', 'N/A')}")
 
         if "results" not in result:
-            print("❌ No results found in response")
+            print(f"{Fore.RED}✗ No results found in response{Style.RESET_ALL}")
             return
 
         results = result["results"]
-        print(f"\n🔍 TICKER ANALYSIS RESULTS")
-        print("=" * 50)
+        print(f"\n{Fore.GREEN}TICKER ANALYSIS RESULTS{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'=' * 50}{Style.RESET_ALL}")
 
         for ticker, ticker_data in results.items():
-            print(f"\n📊 {ticker}:")
-            print("-" * 20)
+            print(f"\n{Fore.CYAN}{ticker}:{Style.RESET_ALL}")
+            print(f"{Fore.BLUE}{'-' * 20}{Style.RESET_ALL}")
 
             # Check for errors first
             if "error" in ticker_data:
-                print(f"  ❌ Error: {ticker_data['error']}")
+                print(f"  {Fore.RED}✗ Error: {ticker_data['error']}{Style.RESET_ALL}")
                 continue
 
             # Core recommendation
@@ -106,9 +134,9 @@ class ClariFiCLI:
                 rec = ticker_data["overall_recommendation"]
                 conf = ticker_data.get("confidence_level", "N/A")
                 risk = ticker_data.get("risk_level", "N/A")
-                print(f"  💡 Recommendation: {rec}")
-                print(f"  🎯 Confidence: {conf}")
-                print(f"  ⚠️  Risk Level: {risk}")
+                print(f"  {Fore.GREEN}💡 Recommendation: {rec}{Style.RESET_ALL}")
+                print(f"  {Fore.BLUE}🎯 Confidence: {conf}{Style.RESET_ALL}")
+                print(f"  {Fore.YELLOW}⚠️  Risk Level: {risk}{Style.RESET_ALL}")
 
             if detailed:
                 # Analysis ID
