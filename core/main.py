@@ -29,6 +29,7 @@ try:
     from live_monitor import LiveStockMonitor
     from stock_screener import StockScreener
     from alphavantage_analyzer import AlphaVantageAnalyzer
+    from strategy_analyzer import StrategyAnalyzer
     # Import ML analyzer with fallback
     try:
         from ml_analyzer import MLAnalyzer
@@ -2466,6 +2467,32 @@ def main():
     seasonal_parser.add_argument('--period', '-p', default='5y', help='Time period (default: 5y for better patterns)')
     seasonal_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
 
+    # Strategy recommendation
+    strategy_parser = subparsers.add_parser(
+        'strategy',
+        help='🎯 Generate time-sensitive investment strategy',
+        description='Analyze a ticker using multiple timeframes, seasonal patterns, backtesting, and technical indicators to suggest actionable strategies like "BUY now and SELL in 2 days" or "HOLD for 2 months".',
+        epilog=(
+            "Examples:\n"
+            "  ./clarifi.sh strategy AAPL --period 1y\n"
+            "  ./clarifi.sh strategy TSLA --period 2y --include-deep\n"
+            "  ./clarifi.sh strategy MSFT --period 6mo --no-download\n\n"
+            "The strategy command runs comprehensive analysis including:\n"
+            "  - Multi-timeframe trend analysis (short/medium/long-term)\n"
+            "  - Seasonal patterns and holiday effects\n"
+            "  - Deep backtesting with multiple periods (if --include-deep)\n"
+            "  - Technical indicators (RSI, MACD, Moving Averages)\n"
+            "  - Risk metrics (volatility, drawdown, Sharpe ratio)\n"
+            "  - Optimal timeframe determination based on historical performance\n"
+        )
+    )
+    strategy_parser.add_argument('ticker', help='Stock ticker symbol (single ticker only)')
+    strategy_parser.add_argument('--period', '-p', default='1y', help='Time period for analysis (default: 1y, recommended: 2y+)')
+    strategy_parser.add_argument('--no-download', action='store_true', help='Skip downloading fresh data')
+    strategy_parser.add_argument('--include-deep', action='store_true', help='Include deep backtesting analysis for higher confidence')
+    strategy_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
+    strategy_parser.add_argument('--optimum', action='store_true', help='Find optimal buy/sell moment based on all analysis data')
+
     # ML analysis
     ml_parser = subparsers.add_parser('ml_analyze', help='🤖 Machine Learning analysis with Random Forest, XGBoost, LightGBM')
     ml_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
@@ -2942,6 +2969,293 @@ def main():
             if getattr(args, 'json', False):
                 import json
                 print(json.dumps(result, indent=2))
+
+        elif args.command == 'strategy':
+            # Generate investment strategy for a single ticker
+            ticker = args.ticker.upper()
+
+            analysis._print_header(f"INVESTMENT STRATEGY FOR {ticker}", "🎯")
+            print(f"📅 Analysis Period: {args.period}")
+            if args.include_deep:
+                print(f"🔬 Deep Analysis: Enabled (chunk size: {args.deep_chunk_months} months)")
+            print()
+
+            # Step 1: Download or load data
+            if not args.no_download:
+                analysis._print_section_header("DOWNLOADING DATA")
+                downloader = StockDownloader()
+                download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                if not download_result or not download_result.get(ticker):
+                    analysis._print_error(f"Failed to download data for {ticker}")
+                    return
+                analysis._print_success("Data downloaded successfully")
+
+            # Load data
+            files = analysis.visualizer.find_stock_files(ticker)
+            if not files:
+                analysis._print_error(f"No data found for {ticker}. Download first with: ./clarifi.sh download {ticker}")
+                return
+
+            latest_file = max(files, key=os.path.getctime)
+            data = analysis.visualizer.load_stock_data(latest_file)
+            if data is None or len(data) < 60:
+                analysis._print_error(f"Insufficient data for {ticker} (need 60+ points, got {len(data) if data is not None else 0})")
+                return
+
+            print(f"✓ Loaded {len(data)} data points from {data.index[0].strftime('%Y-%m-%d')} to {data.index[-1].strftime('%Y-%m-%d')}")
+            print()
+
+            # Step 2: Run seasonal analysis
+            analysis._print_section_header("SEASONAL ANALYSIS")
+            seasonal_analyzer = SeasonalAnalyzer()
+            seasonal_result = seasonal_analyzer.analyze(data)
+            if seasonal_result:
+                print(f"✓ Seasonal patterns analyzed")
+                print(f"  Best months: {', '.join(seasonal_result['best_months'])}")
+                print(f"  Worst months: {', '.join(seasonal_result['worst_months'])}")
+                print(f"  Seasonal bias score: {seasonal_result['bias_score']:.2f}")
+            else:
+                seasonal_result = None
+                print("⚠️  Insufficient data for seasonal analysis")
+            print()
+
+            # Step 3: Calculate technical indicators
+            analysis._print_section_header("TECHNICAL INDICATORS")
+            pattern_analyzer = PatternAnalyzer()
+            pattern_analyzer.add_technical_indicators(data)
+
+            # Capture technical indicators
+            technical_indicators = {
+                'ADX': float(data['ADX'].iloc[-1]) if 'ADX' in data.columns and not data['ADX'].isna().iloc[-1] else None,
+                'RSI_14': float(data['RSI_14'].iloc[-1]) if 'RSI_14' in data.columns and not data['RSI_14'].isna().iloc[-1] else None,
+                'MACD': float(data['MACD'].iloc[-1]) if 'MACD' in data.columns and not data['MACD'].isna().iloc[-1] else None,
+                'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in data.columns and not data['MACD_Signal'].isna().iloc[-1] else None,
+                'Williams_%R': float(data['Williams_%R'].iloc[-1]) if 'Williams_%R' in data.columns and not data['Williams_%R'].isna().iloc[-1] else None,
+            }
+
+            # Add risk metrics
+            risk_metrics = pattern_analyzer.calculate_risk_metrics(data)
+            technical_indicators['risk_metrics'] = risk_metrics
+
+            # Add market regime
+            regime = pattern_analyzer.detect_market_regime(data)
+            technical_indicators['market_regime'] = regime
+
+            print(f"✓ Technical indicators calculated")
+            if technical_indicators['RSI_14']:
+                print(f"  RSI(14): {technical_indicators['RSI_14']:.2f}")
+            if technical_indicators['ADX']:
+                print(f"  ADX: {technical_indicators['ADX']:.2f}")
+            print(f"  Market Regime: {regime.get('regime', 'UNKNOWN')}")
+            print()
+
+            # Step 4: Run deep backtesting if requested
+            deep_result = None
+            if args.include_deep:
+                analysis._print_section_header("DEEP BACKTESTING ANALYSIS")
+                try:
+                    from engine import ClariFiEngine
+                    engine = ClariFiEngine()
+                    deep_result = engine._run_deep_analysis(
+                        ticker,
+                        data.copy(),
+                        chunk_months=args.deep_chunk_months
+                    )
+                    if deep_result and not deep_result.get('error'):
+                        summary = deep_result.get('summary', {})
+                        precision = summary.get('coefficient_of_precision', 0)
+                        chunks_eval = summary.get('chunks_evaluated', 0)
+                        print(f"✓ Deep backtesting completed")
+                        print(f"  Precision coefficient: {precision:.2%}")
+                        print(f"  Chunks evaluated: {chunks_eval}")
+                    else:
+                        print(f"⚠️  Deep analysis failed: {deep_result.get('error', 'Unknown error') if deep_result else 'Execution failed'}")
+                        deep_result = None
+                except ImportError:
+                    print("⚠️  ClariFiEngine not available for deep analysis")
+                    deep_result = None
+                except Exception as e:
+                    print(f"⚠️  Deep analysis error: {str(e)}")
+                    deep_result = None
+                print()
+
+            # Step 5: Generate strategy
+            analysis._print_section_header("GENERATING STRATEGY")
+            if args.optimum:
+                print("🎯 Finding optimal buy/sell moment...")
+            strategy_analyzer = StrategyAnalyzer()
+            strategy = strategy_analyzer.generate_strategy(
+                ticker=ticker,
+                data=data,
+                period=args.period,
+                seasonal_analysis=seasonal_result,
+                deep_analysis=deep_result,
+                technical_indicators=technical_indicators,
+                find_optimum=args.optimum,
+            )
+
+            # Display strategy
+            print()
+            print("=" * 70)
+            analysis._print_header("INVESTMENT STRATEGY RECOMMENDATION", "💡")
+            print("=" * 70)
+            print()
+            print(f"📊 Ticker: {strategy.ticker}")
+            print(f"💰 Current Price: ${strategy.entry_price:.2f}")
+            print()
+
+            # Action with emoji
+            action_emoji = "🟢" if strategy.action == "BUY" else "🔴" if strategy.action == "SELL" else "🟡"
+            print(f"{action_emoji} ACTION: {strategy.action}")
+            print(f"⏱️  TIMEFRAME: {strategy.timeframe}")
+            print(f"📅 TARGET DATE: {strategy.target_date}")
+            print(f"🎯 CONFIDENCE: {strategy.confidence}")
+            print(f"⚠️  RISK LEVEL: {strategy.risk_level}")
+
+            if strategy.expected_return_pct is not None:
+                sign = "+" if strategy.expected_return_pct >= 0 else ""
+                print(f"📈 EXPECTED RETURN: {sign}{strategy.expected_return_pct:.2f}%")
+            print()
+
+            print("💭 RATIONALE:")
+            for i, reason in enumerate(strategy.rationale, 1):
+                print(f"  {i}. {reason}")
+            print()
+
+            # Additional metrics
+            if strategy.key_metrics:
+                print("📊 KEY METRICS:")
+                if 'overall_score' in strategy.key_metrics:
+                    print(f"  Overall Score: {strategy.key_metrics['overall_score']}/100")
+
+                if 'risk_metrics' in strategy.key_metrics:
+                    rm = strategy.key_metrics['risk_metrics']
+                    print(f"  Max Drawdown: {rm.get('max_drawdown', 0):.2f}%")
+                    print(f"  Sharpe Ratio: {rm.get('sharpe_ratio', 0):.2f}")
+                    print(f"  VaR (95%): {rm.get('var_95', 0):.2f}%")
+
+                if 'trend' in strategy.key_metrics:
+                    trend = strategy.key_metrics['trend']
+                    print(f"  Short-term Trend: {trend.get('short_term', 'N/A')}")
+                    print(f"  Medium-term Trend: {trend.get('medium_term', 'N/A')}")
+                    if trend.get('long_term'):
+                        print(f"  Long-term Trend: {trend['long_term']}")
+
+            print()
+
+            # Display price predictions
+            if strategy.predictions:
+                print("🔮 FUTURE PRICE PREDICTIONS:")
+                print()
+
+                # Short-term
+                if 'short_term' in strategy.predictions:
+                    st = strategy.predictions['short_term']
+                    change_sign = "+" if st.predicted_change_pct >= 0 else ""
+                    change_emoji = "📈" if st.predicted_change_pct >= 0 else "📉"
+                    print(f"  📅 SHORT-TERM ({st.horizon_days} days):")
+                    print(f"     Target Date: {st.target_date}")
+                    print(f"     {change_emoji} Predicted Price: ${st.predicted_price:.2f} ({change_sign}{st.predicted_change_pct:.2f}%)")
+                    print(f"     🎯 Confidence: {st.confidence}")
+                    if st.reasoning:
+                        print(f"     💡 Key Factors: {', '.join(st.reasoning)}")
+                    print()
+
+                # Mid-term
+                if 'mid_term' in strategy.predictions:
+                    mt = strategy.predictions['mid_term']
+                    change_sign = "+" if mt.predicted_change_pct >= 0 else ""
+                    change_emoji = "📈" if mt.predicted_change_pct >= 0 else "📉"
+                    print(f"  📅 MID-TERM ({mt.horizon_days} days / ~1 month):")
+                    print(f"     Target Date: {mt.target_date}")
+                    print(f"     {change_emoji} Predicted Price: ${mt.predicted_price:.2f} ({change_sign}{mt.predicted_change_pct:.2f}%)")
+                    print(f"     🎯 Confidence: {mt.confidence}")
+                    if mt.reasoning:
+                        print(f"     💡 Key Factors: {', '.join(mt.reasoning)}")
+                    print()
+
+                # Long-term
+                if 'long_term' in strategy.predictions:
+                    lt = strategy.predictions['long_term']
+                    change_sign = "+" if lt.predicted_change_pct >= 0 else ""
+                    change_emoji = "📈" if lt.predicted_change_pct >= 0 else "📉"
+                    print(f"  📅 LONG-TERM ({lt.horizon_days} days / ~3 months):")
+                    print(f"     Target Date: {lt.target_date}")
+                    print(f"     {change_emoji} Predicted Price: ${lt.predicted_price:.2f} ({change_sign}{lt.predicted_change_pct:.2f}%)")
+                    print(f"     🎯 Confidence: {lt.confidence}")
+                    if lt.reasoning:
+                        print(f"     💡 Key Factors: {', '.join(lt.reasoning)}")
+                    print()
+
+            # Display optimal moment if requested
+            if args.optimum and strategy.optimal_moment:
+                opt = strategy.optimal_moment
+                print("🎯 OPTIMAL BUY/SELL MOMENT:")
+                print()
+
+                # Action with emoji
+                action_emoji = "🟢" if opt.action == "BUY" else "🔴" if opt.action == "SELL" else "🟡"
+                print(f"  {action_emoji} RECOMMENDED ACTION: {opt.action}")
+                print(f"  📅 OPTIMAL DATE: {opt.optimal_date}")
+
+                if opt.days_from_now == 0:
+                    print(f"  ⏰ TIMING: NOW (Immediate action recommended)")
+                else:
+                    print(f"  ⏰ TIMING: {opt.days_from_now} days from now")
+
+                print(f"  💰 EXPECTED PRICE: ${opt.expected_price:.2f}")
+
+                if opt.expected_return_pct != 0:
+                    return_sign = "+" if opt.expected_return_pct > 0 else ""
+                    return_emoji = "📈" if opt.expected_return_pct > 0 else "📉"
+                    print(f"  {return_emoji} EXPECTED RETURN: {return_sign}{opt.expected_return_pct:.2f}%")
+
+                print(f"  🎯 CONFIDENCE: {opt.confidence}")
+                print(f"  ⚖️  RISK/REWARD RATIO: {opt.risk_reward_ratio:.2f}")
+                print()
+
+                print("  💭 KEY REASONING:")
+                for i, reason in enumerate(opt.reasoning, 1):
+                    print(f"     {i}. {reason}")
+                print()
+
+                # Supporting signals
+                if opt.supporting_signals:
+                    print("  📊 SUPPORTING ANALYSIS:")
+                    sig = opt.supporting_signals
+
+                    if 'candidate_type' in sig:
+                        type_map = {
+                            'seasonal_buy': 'Seasonal Pattern (Best Month)',
+                            'seasonal_sell': 'Seasonal Pattern (Worst Month)',
+                            'technical_buy_oversold': 'Technical Indicator (Oversold)',
+                            'technical_sell_overbought': 'Technical Indicator (Overbought)',
+                            'pattern_buy': 'Historical Pattern',
+                            'support_buy': 'Support Level',
+                            'resistance_sell': 'Resistance Level',
+                            'backtest_buy': 'Backtesting Performance',
+                            'backtest_sell': 'Backtesting Performance',
+                        }
+                        print(f"     Signal Type: {type_map.get(sig['candidate_type'], sig['candidate_type'])}")
+
+                    if 'target_month' in sig:
+                        print(f"     Target Month: {sig['target_month']}")
+
+                    if 'optimal_hold_period' in sig:
+                        print(f"     Suggested Hold Period: {sig['optimal_hold_period']} days")
+
+                    if 'win_rate' in sig:
+                        print(f"     Historical Win Rate: {sig['win_rate']:.0f}%")
+
+                    if 'trend_alignment' in sig:
+                        alignment = "✓ Aligned" if sig['trend_alignment'] else "⚠ Contrarian"
+                        print(f"     Trend Alignment: {alignment}")
+
+                    print()
+
+            print("=" * 70)
+            print("⚠️  DISCLAIMER: This is not financial advice. Always do your own research.")
+            print("=" * 70)
 
         elif args.command == 'ml_analyze':
             # Check if ML dependencies are available

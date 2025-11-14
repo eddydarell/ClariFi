@@ -214,6 +214,137 @@ Disclaimer: The AI Analyzer provides heuristic + LLM synthesized suggestions and
 
 ---
 
+### 🎯 Strategy Analyzer (Time-Sensitive Investment Strategies)
+
+The Strategy Analyzer generates actionable, time-sensitive investment recommendations by combining multi-dimensional analysis across trends, seasonality, backtesting, and risk metrics. Unlike simple BUY/SELL/HOLD signals, it provides specific timeframes like **"BUY now and SELL in 2 days"** or **"HOLD for 2 months"**.
+
+**Key Analysis Dimensions**:
+
+- **Multi-timeframe Trends**: Short-term (10/20 SMA), medium-term (20/50 SMA), long-term (50/200 SMA)
+- **Technical Indicators**: RSI, MACD, ADX, Williams %R, market regime detection
+- **Seasonal Patterns**: Monthly performance stats, best/worst months, holiday effects
+- **Risk Metrics**: Max drawdown, Sharpe ratio, Value at Risk (VaR 95%)
+- **Deep Backtesting**: Optional chunked historical validation with precision coefficients
+- **Optimal Timeframe**: Analyzes 2-day, 5-day, 1-week, 2-week, 1-month, 2-month holding periods
+
+**Strategy Scoring System** (composite -100 to +100):
+
+- **Trend Signals (40%)**: Short/medium/long-term alignment
+- **Momentum (25%)**: RSI oversold/overbought, MACD crossovers
+- **Seasonal (15%)**: Historical month performance patterns
+- **Backtesting (10%)**: Strategy validation across periods
+- **Volatility/Risk (10%)**: High volatility penalties
+
+**Action Thresholds**:
+
+- **BUY**: Score ≥ 40 (strong bullish signals)
+- **SELL**: Score ≤ -40 (strong bearish signals)
+- **HOLD**: -40 < Score < 40 (mixed/neutral signals)
+
+Usage:
+
+```bash
+# Basic strategy analysis
+./clarifi.sh strategy AAPL --period 1y
+
+# With deep backtesting for higher confidence
+./clarifi.sh strategy TSLA --period 2y --include-deep
+
+# Find optimal buy/sell moment
+./clarifi.sh strategy MSFT --period 2y --optimum
+
+# Complete analysis with all features
+./clarifi.sh strategy NVDA --period 2y --include-deep --optimum
+
+# Using existing data (no download)
+./clarifi.sh strategy AAPL --period 6mo --no-download
+
+# Custom deep analysis parameters
+./clarifi.sh strategy GOOG --period 2y --include-deep --deep-chunk-months 6 --optimum
+```
+
+Flags:
+
+- `--period <range>`: Analysis period (default: 1y, recommended: 2y+ for seasonal data)
+- `--no-download`: Use existing data without downloading fresh data
+- `--include-deep`: Enable deep backtesting analysis (increases confidence)
+- `--deep-chunk-months`: Chunk size for deep analysis (default: 3 months)
+- `--optimum`: Find optimal buy/sell moment based on all KPIs and analysis data
+
+**Output Components**:
+
+1. **Strategy Recommendation**:
+   - Action: BUY 🟢, SELL 🔴, or HOLD 🟡
+   - Timeframe: Optimal holding period (e.g., "2 days", "1 week", "2 months")
+   - Target Date: Estimated action date
+   - Confidence: HIGH/MEDIUM/LOW
+   - Risk Level: LOW/MEDIUM/HIGH
+   - Expected Return: Projected % return (if applicable)
+
+2. **Rationale**: 3-5 key factors driving the recommendation
+
+3. **Future Price Predictions**:
+   - Short-term (5 days): Predicted price, % change, confidence, key factors
+   - Mid-term (30 days): Predicted price, % change, confidence, key factors
+   - Long-term (90 days): Predicted price, % change, confidence, key factors
+   - Based on trend extrapolation, seasonal patterns, and momentum analysis
+
+4. **Optimal Buy/Sell Moment** (with --optimum flag):
+   - Recommended action (BUY/SELL) with optimal timing
+   - Expected price and return at optimal moment
+   - Confidence level and risk/reward ratio
+   - Key reasoning (seasonal patterns, technical signals, historical performance)
+   - Supporting analysis (signal type, win rates, trend alignment)
+
+5. **Key Metrics**:
+   - Overall score (0-100)
+   - Trend directions across timeframes
+   - Risk metrics (drawdown, Sharpe, VaR)
+   - Market regime classification
+
+**Example Output**:
+
+```
+📊 Ticker: AAPL
+💰 Current Price: $270.37
+
+🟡 ACTION: HOLD
+⏱️  TIMEFRAME: Current
+📅 TARGET DATE: 2025-11-10
+🎯 CONFIDENCE: MEDIUM
+⚠️  RISK LEVEL: LOW
+📈 EXPECTED RETURN: +0.00%
+
+💭 RATIONALE:
+  1. HOLD signal (score: 35/100) - Mixed signals
+  2. Short-term uptrend (SMA10 > SMA20)
+  3. Overbought conditions (RSI: 80.5)
+  4. Significant drawdown risk (-33.4%)
+
+📊 KEY METRICS:
+  Overall Score: 35/100
+  Max Drawdown: -33.36%
+  Sharpe Ratio: 0.83
+  VaR (95%): -3.18%
+  Short-term Trend: BULLISH
+  Medium-term Trend: BULLISH
+  Long-term Trend: BULLISH
+```
+
+**Best Practices**:
+
+- Use periods of 2y+ for reliable seasonal analysis
+- Enable `--include-deep` for higher confidence strategies
+- Compare strategies across different time periods
+- Always validate with fresh data for critical decisions
+- Consider risk level alongside the recommendation
+
+**See Full Documentation**: [docs/STRATEGY_COMMAND.md](docs/STRATEGY_COMMAND.md)
+
+Disclaimer: Strategy recommendations are based on historical patterns and are NOT financial advice.
+
+---
+
 ### Web Interface (Recommended)
 
 1. **Launch the application**:
