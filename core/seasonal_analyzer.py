@@ -40,7 +40,7 @@ class SeasonalAnalyzer:
             'Thanksgiving': [(11, 22)],  # 4th Thursday approximation
             'Black Friday': [(11, 23)],
             'Christmas': [(12, 25)],
-            'New Year Eve': [(12, 31)]
+            'New Year Eve': [(12, 31)],
         }
 
         # Seasonal business patterns
@@ -89,15 +89,15 @@ class SeasonalAnalyzer:
             summary = self._generate_seasonal_summary(monthly_stats, holiday_effects, best_months, worst_months)
             recommendation = self._generate_recommendation(bias_score, best_months, worst_months)
 
-            return {
-                'monthly_stats': monthly_stats,
-                'holiday_effects': holiday_effects,
-                'seasonal_summary': summary,
-                'recommendation': recommendation,
-                'bias_score': float(bias_score),
-                'best_months': best_months,
-                'worst_months': worst_months
-            }
+            return SeasonalPatternResult(
+                monthly_stats=monthly_stats,
+                holiday_effects=holiday_effects,
+                seasonal_summary=summary,
+                recommendation=recommendation,
+                bias_score=float(bias_score),
+                best_months=best_months,
+                worst_months=worst_months
+            )
 
         except Exception as e:
             print(f"Error in seasonal analysis: {e}")

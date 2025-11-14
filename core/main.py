@@ -968,6 +968,181 @@ class AdvancedStockAnalysis:
         self._print_success("Seasonal analysis complete!")
         print(f"📁 Data files: {self.downloader.data_dir}/")
 
+    def prune_data(self):
+        """Interactive data pruning to save disk space."""
+        import shutil
+        from pathlib import Path
+
+        self._print_header("DATA PRUNING UTILITY", "🗑️")
+        print("This tool helps you clean up old data, graphs, and models to save disk space.")
+        print()
+
+        # Define directories to clean
+        data_dir = Path("data")
+        graphs_dir = Path("graphs")
+        models_dir = Path("models")
+
+        # Get file counts and sizes
+        def get_dir_stats(directory):
+            if not directory.exists():
+                return 0, 0, []
+            files = list(directory.glob("*"))
+            total_size = sum(f.stat().st_size for f in files if f.is_file())
+            return len(files), total_size, files
+
+        data_count, data_size, data_files = get_dir_stats(data_dir)
+        graphs_count, graphs_size, graphs_files = get_dir_stats(graphs_dir)
+        models_count, models_size, models_files = get_dir_stats(models_dir)
+
+        def format_size(bytes_size):
+            """Format bytes to human readable format."""
+            for unit in ['B', 'KB', 'MB', 'GB']:
+                if bytes_size < 1024.0:
+                    return f"{bytes_size:.1f}{unit}"
+                bytes_size /= 1024.0
+            return f"{bytes_size:.1f}TB"
+
+        print("📊 CURRENT STORAGE USAGE:")
+        print(f"  📁 Data files: {data_count} files ({format_size(data_size)})")
+        print(f"  📊 Graphs: {graphs_count} files ({format_size(graphs_size)})")
+        print(f"  🤖 Models: {models_count} files ({format_size(models_size)})")
+        total_size = data_size + graphs_size + models_size
+        total_files = data_count + graphs_count + models_count
+        print(f"  💾 Total: {total_files} files ({format_size(total_size)})")
+        print()
+
+        # Interactive menu
+        while True:
+            print("🗑️  PRUNING OPTIONS:")
+            print("  1. Prune CSV data files")
+            print("  2. Prune graph files")
+            print("  3. Prune model files")
+            print("  4. Prune all (data + graphs + models)")
+            print("  5. Show detailed file list")
+            print("  6. Exit")
+            print()
+
+            try:
+                choice = input("Select option (1-6): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n❌ Operation cancelled.")
+                return
+
+            if choice == '6':
+                print("👋 Exiting prune utility.")
+                return
+
+            elif choice == '5':
+                # Show detailed file list
+                print("\n📋 DETAILED FILE LIST:")
+                if data_files:
+                    print(f"📁 Data files ({len(data_files)}):")
+                    for f in sorted(data_files)[:10]:  # Show first 10
+                        print(f"  📄 {f.name} ({format_size(f.stat().st_size)})")
+                    if len(data_files) > 10:
+                        print(f"  ... and {len(data_files) - 10} more files")
+                else:
+                    print("📁 No data files found.")
+
+                if graphs_files:
+                    print(f"\n📊 Graph files ({len(graphs_files)}):")
+                    for f in sorted(graphs_files)[:10]:
+                        print(f"  📈 {f.name} ({format_size(f.stat().st_size)})")
+                    if len(graphs_files) > 10:
+                        print(f"  ... and {len(graphs_files) - 10} more files")
+                else:
+                    print("\n📊 No graph files found.")
+
+                if models_files:
+                    print(f"\n🤖 Model files ({len(models_files)}):")
+                    for f in sorted(models_files)[:10]:
+                        print(f"  🧠 {f.name} ({format_size(f.stat().st_size)})")
+                    if len(models_files) > 10:
+                        print(f"  ... and {len(models_files) - 10} more files")
+                else:
+                    print("\n🤖 No model files found.")
+                print()
+
+            elif choice in ['1', '2', '3', '4']:
+                # Determine what to prune
+                if choice == '1':
+                    target_dirs = [('data', data_dir, data_files)]
+                    target_name = "CSV data files"
+                elif choice == '2':
+                    target_dirs = [('graphs', graphs_dir, graphs_files)]
+                    target_name = "graph files"
+                elif choice == '3':
+                    target_dirs = [('models', models_dir, models_files)]
+                    target_name = "model files"
+                elif choice == '4':
+                    target_dirs = [('data', data_dir, data_files), ('graphs', graphs_dir, graphs_files), ('models', models_dir, models_files)]
+                    target_name = "all files (data, graphs, models)"
+
+                # Calculate total files to delete
+                total_to_delete = sum(len(files) for _, _, files in target_dirs)
+
+                if total_to_delete == 0:
+                    print(f"ℹ️  No {target_name} found to prune.")
+                    continue
+
+                print(f"\n⚠️  WARNING: This will permanently delete {total_to_delete} {target_name}!")
+                print("This action cannot be undone.")
+
+                # Show what will be deleted
+                for dir_name, dir_path, files in target_dirs:
+                    if files:
+                        print(f"\n📁 {dir_name.upper()} directory ({len(files)} files):")
+                        for f in sorted(files)[:5]:  # Show first 5
+                            print(f"  🗑️  {f.name}")
+                        if len(files) > 5:
+                            print(f"  ... and {len(files) - 5} more files")
+
+                # Confirm deletion
+                while True:
+                    try:
+                        confirm = input(f"\n🔴 Type 'DELETE' to confirm deletion of {total_to_delete} files: ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        print("\n❌ Operation cancelled.")
+                        return
+
+                    if confirm.upper() == 'DELETE':
+                        break
+                    elif confirm.upper() == 'CANCEL':
+                        print("❌ Operation cancelled.")
+                        return
+                    else:
+                        print("❌ Please type 'DELETE' to confirm or 'CANCEL' to abort.")
+
+                # Perform deletion
+                deleted_count = 0
+                for dir_name, dir_path, files in target_dirs:
+                    for file_path in files:
+                        try:
+                            if file_path.exists():
+                                file_path.unlink()
+                                deleted_count += 1
+                                print(f"🗑️  Deleted: {file_path.name}")
+                        except Exception as e:
+                            print(f"❌ Error deleting {file_path.name}: {e}")
+
+                self._print_success(f"Successfully deleted {deleted_count} files!")
+                print(f"💾 Space saved: ~{format_size(sum(f.stat().st_size for _, _, files in target_dirs for f in files if f.exists()))}")
+
+                # Ask if user wants to continue
+                try:
+                    continue_choice = input("\n🔄 Continue pruning? (y/N): ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n👋 Exiting prune utility.")
+                    return
+
+                if continue_choice not in ['y', 'yes']:
+                    print("👋 Exiting prune utility.")
+                    return
+
+            else:
+                print("❌ Invalid option. Please select 1-6.")
+                continue
+
     def _generate_summary_report(self, tickers, correlation_results, volatility_results,
                                trend_results, event_results, unusual_movements,
                                options_results=None, portfolio_advice=None, seasonal_results=None, deep_results=None,
@@ -2480,6 +2655,9 @@ def main():
                                 help='Number of results to return (default: 20)')
     screener_parser.add_argument('--export', '-e', help='Export results to CSV file')
 
+    # Prune command
+    prune_parser = subparsers.add_parser('prune', help='🗑️ Interactive cleanup of data, graphs, and models to save space')
+
     # Portfolio management (grouped subcommands)
     portfolio_parser = subparsers.add_parser('portfolio', help='Portfolio management commands (create, list, info, add, update-ticker, update, sync, delete, remove, tickers, analyze)')
     port_sub = portfolio_parser.add_subparsers(dest='portfolio_cmd', help='Portfolio Commands')
@@ -3758,6 +3936,9 @@ def main():
                 # TODO: Implement CSV export if requested
                 if args.export:
                     print(f"💾 CSV export functionality coming soon...")
+
+        elif args.command == 'prune':
+            analysis.prune_data()
 
         elif args.command == 'portfolio':
 
