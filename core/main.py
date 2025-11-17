@@ -222,6 +222,14 @@ class AdvancedStockAnalysis:
         if obj is None:
             return None
 
+        # Handle dataclasses (like SeasonalPatternResult)
+        if hasattr(obj, '__dataclass_fields__'):
+            from dataclasses import asdict
+            try:
+                return self._convert_to_json_serializable(asdict(obj))
+            except:
+                return str(obj)
+
         # Handle pandas DataFrame
         if hasattr(obj, 'to_dict'):
             try:
@@ -655,11 +663,11 @@ class AdvancedStockAnalysis:
 
                         if not json_output:
                             # Display key seasonal insights
-                            print(f"    🌟 Recommendation: {seasonal_result['recommendation']}")
-                            print(f"    📊 Seasonal Bias Score: {seasonal_result['bias_score']:.2f}")
-                            print(f"    📈 Best Months: {', '.join(seasonal_result['best_months'])}")
-                            print(f"    📉 Worst Months: {', '.join(seasonal_result['worst_months'])}")
-                            print(f"    💡 Pattern: {seasonal_result['seasonal_summary']}")
+                            print(f"    🌟 Recommendation: {seasonal_result.recommendation}")
+                            print(f"    📊 Seasonal Bias Score: {seasonal_result.bias_score:.2f}")
+                            print(f"    📈 Best Months: {', '.join(seasonal_result.best_months)}")
+                            print(f"    📉 Worst Months: {', '.join(seasonal_result.worst_months)}")
+                            print(f"    💡 Pattern: {seasonal_result.seasonal_summary}")
                     else:
                         if not json_output:
                             self._print_warning(f"Insufficient data for seasonal analysis")
@@ -1363,23 +1371,23 @@ class AdvancedStockAnalysis:
         if seasonal_results:
             self._print_section_header("SEASONAL PATTERNS")
             for ticker, seasonal_data in seasonal_results.items():
-                seasonal_emoji = "🌟" if "FAVORABLE" in seasonal_data['recommendation'] else \
-                               "⚠️" if "UNFAVORABLE" in seasonal_data['recommendation'] else "🔄"
+                seasonal_emoji = "🌟" if "FAVORABLE" in seasonal_data.recommendation else \
+                               "⚠️" if "UNFAVORABLE" in seasonal_data.recommendation else "🔄"
 
-                bias_desc = "Strong" if seasonal_data['bias_score'] > 0.5 else \
-                           "Moderate" if seasonal_data['bias_score'] > 0.2 else "Weak"
+                bias_desc = "Strong" if seasonal_data.bias_score > 0.5 else \
+                           "Moderate" if seasonal_data.bias_score > 0.2 else "Weak"
 
                 print(f"  {seasonal_emoji} {ticker}: {bias_desc} seasonal bias "
-                      f"(Score: {seasonal_data['bias_score']:.2f})")
-                print(f"    📈 Strong months: {', '.join(seasonal_data['best_months'])}")
-                print(f"    📉 Weak months: {', '.join(seasonal_data['worst_months'])}")
-                print(f"    💡 Pattern: {seasonal_data['seasonal_summary']}")
+                      f"(Score: {seasonal_data.bias_score:.2f})")
+                print(f"    📈 Strong months: {', '.join(seasonal_data.best_months)}")
+                print(f"    📉 Weak months: {', '.join(seasonal_data.worst_months)}")
+                print(f"    💡 Pattern: {seasonal_data.seasonal_summary}")
 
                 # Current month context
                 current_month = calendar.month_name[datetime.now().month]
-                if current_month in seasonal_data['best_months']:
+                if current_month in seasonal_data.best_months:
                     print(f"    🎯 Current timing: FAVORABLE ({current_month})")
-                elif current_month in seasonal_data['worst_months']:
+                elif current_month in seasonal_data.worst_months:
                     print(f"    ⏰ Current timing: UNFAVORABLE ({current_month})")
                 else:
                     print(f"    ➡️ Current timing: NEUTRAL ({current_month})")
@@ -1512,9 +1520,9 @@ class AdvancedStockAnalysis:
         if seasonal_results:
             current_month = calendar.month_name[datetime.now().month]
             favorable_seasonal = [ticker for ticker, data in seasonal_results.items()
-                                 if current_month in data['best_months']]
+                                 if current_month in data.best_months]
             unfavorable_seasonal = [ticker for ticker, data in seasonal_results.items()
-                                   if current_month in data['worst_months']]
+                                   if current_month in data.worst_months]
 
             if favorable_seasonal:
                 insights.append(f"🌟 Seasonal tailwinds this month: {', '.join(favorable_seasonal)}")
@@ -1523,7 +1531,7 @@ class AdvancedStockAnalysis:
 
             # High seasonal bias stocks
             strong_seasonal = [ticker for ticker, data in seasonal_results.items()
-                             if data['bias_score'] > 0.5]
+                             if data.bias_score > 0.5]
             if strong_seasonal:
                 insights.append(f"🗓️ Strong seasonal patterns: {', '.join(strong_seasonal)}")
 
@@ -3074,9 +3082,9 @@ def main():
             seasonal_result = seasonal_analyzer.analyze(data)
             if seasonal_result:
                 print(f"✓ Seasonal patterns analyzed")
-                print(f"  Best months: {', '.join(seasonal_result['best_months'])}")
-                print(f"  Worst months: {', '.join(seasonal_result['worst_months'])}")
-                print(f"  Seasonal bias score: {seasonal_result['bias_score']:.2f}")
+                print(f"  Best months: {', '.join(seasonal_result.best_months)}")
+                print(f"  Worst months: {', '.join(seasonal_result.worst_months)}")
+                print(f"  Seasonal bias score: {seasonal_result.bias_score:.2f}")
             else:
                 seasonal_result = None
                 print("⚠️  Insufficient data for seasonal analysis")
