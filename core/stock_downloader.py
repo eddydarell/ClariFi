@@ -51,7 +51,7 @@ class StockDownloader:
         if not os.path.exists(self.data_dir):
             os.makedirs(self.data_dir)
 
-    def download_stock_data(self, ticker, start_date, end_date, period=None):
+    def download_stock_data(self, ticker, start_date=None, end_date=None, period=None):
         """
         Download stock data for a specific ticker.
 

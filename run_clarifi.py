@@ -37,6 +37,7 @@ except ImportError:
         BRIGHT = ''
         DIM = ''
         NORMAL = ''
+        RESET_ALL = ''
     HAS_COLORAMA = False
 
 def main():

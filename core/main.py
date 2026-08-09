@@ -61,22 +61,22 @@ try:
     # Import ML analyzer with fallback
     try:
         from ml_analyzer import MLAnalyzer
-    except ImportError:
+    except Exception:
         MLAnalyzer = None
     # Import RNN analyzer with fallback
     try:
         from rnn_analyzer import RNNAnalyzer
-    except ImportError:
+    except Exception:
         RNNAnalyzer = None
     # Import Transformer analyzer with fallback
     try:
         from transformer_analyzer import TransformerAnalyzer
-    except ImportError:
+    except Exception:
         TransformerAnalyzer = None
     # Import RL analyzer with fallback
     try:
         from rl_analyzer import RLAnalyzer
-    except ImportError:
+    except Exception:
         RLAnalyzer = None
 except ImportError as e:
     print(f"Error importing modules: {e}")
@@ -96,13 +96,25 @@ class AdvancedStockAnalysis:
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
         # Initialize ML analyzer if available
-        self.ml_analyzer = MLAnalyzer() if MLAnalyzer else None
+        try:
+            self.ml_analyzer = MLAnalyzer() if MLAnalyzer else None
+        except Exception:
+            self.ml_analyzer = None
         # Initialize RNN analyzer if available
-        self.rnn_analyzer = RNNAnalyzer() if RNNAnalyzer else None
+        try:
+            self.rnn_analyzer = RNNAnalyzer() if RNNAnalyzer else None
+        except Exception:
+            self.rnn_analyzer = None
         # Initialize Transformer analyzer if available
-        self.transformer_analyzer = TransformerAnalyzer() if TransformerAnalyzer else None
+        try:
+            self.transformer_analyzer = TransformerAnalyzer() if TransformerAnalyzer else None
+        except Exception:
+            self.transformer_analyzer = None
         # Initialize RL analyzer if available
-        self.rl_analyzer = RLAnalyzer() if RLAnalyzer else None
+        try:
+            self.rl_analyzer = RLAnalyzer() if RLAnalyzer else None
+        except Exception:
+            self.rl_analyzer = None
 
     def analyze_multi_timeframe(self, ticker, periods=['1mo', '3mo', '6mo', '1y']):
         """
@@ -2447,7 +2459,7 @@ def main():
 {Fore.GREEN}EVENT CORRELATION:{Style.RESET_ALL}
   ./clarifi.sh events PLTR QBTS --period 1y
 
-{Fore.GREEN}LIVE MONITORING:{Style.RESET_ALL}
+{Fore.GREEN}LIVE MONITORING:{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}(Experimental){Style.RESET_ALL}
   ./clarifi.sh live AAPL MSFT TSLA
   ./clarifi.sh live PLTR --interval 10
 
@@ -2458,16 +2470,18 @@ def main():
 {Fore.GREEN}SEASONAL ANALYSIS:{Style.RESET_ALL}
   ./clarifi.sh seasonal AAPL MSFT --period 5y
 
-{Fore.GREEN}AI ANALYSIS:{Style.RESET_ALL}
+{Fore.GREEN}AI ANALYSIS:{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}(Requires Ollama or compatible LLM){Style.RESET_ALL}
   ./clarifi.sh ai AAPL MSFT --period 6mo
   ./clarifi.sh ai PLTR --show-prompt
 
-{Fore.GREEN}PORTFOLIO MANAGEMENT:{Style.RESET_ALL}
+{Fore.GREEN}PORTFOLIO MANAGEMENT:{Style.RESET_ALL} {Fore.LIGHTBLACK_EX}(Optional feature){Style.RESET_ALL}
   ./clarifi.sh portfolio create --name MyPortfolio
   ./clarifi.sh portfolio list
   ./clarifi.sh portfolio add <portfolio_id> AAPL --quantity 10
 
 {Fore.BLUE}TIP:{Style.RESET_ALL} Use quotes for tickers with spaces: "SAAB B"
+
+{Fore.RED}DISCLAIMER:{Style.RESET_ALL} This tool is for educational and research purposes only and does NOT constitute financial advice.
         """
     )
 

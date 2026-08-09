@@ -9,7 +9,12 @@ import sys
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Response
+import asyncio
+import json
+import traceback
+import pandas as pd
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, WebSocket, WebSocketDisconnect
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -18,6 +23,11 @@ from pydantic import BaseModel, Field
 # Add engine to path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from core.engine import ClariFiEngine
+from core.stock_screener import StockScreener
+from core.strategy_analyzer import StrategyAnalyzer
+from core.live_monitor import LiveStockMonitor
+from core.forecast_engine import forecast_prices
+from core.result_schema import envelope, error_item, to_jsonable
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -35,8 +45,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize ClariFi Engine
+# Initialize ClariFi Engines
 engine = ClariFiEngine()
+screener = StockScreener()
+strategy_analyzer = StrategyAnalyzer()
+live_monitor = LiveStockMonitor()
+
 
 # Pydantic models for request/response
 class PortfolioCreate(BaseModel):
@@ -61,6 +75,35 @@ class ComparisonRequest(BaseModel):
     ticker: str = Field(..., description="Ticker symbol")
     portfolio_id: Optional[str] = Field(None, description="Portfolio ID")
     days_ahead: int = Field(30, description="Days to compare")
+
+class ScreenerRequest(BaseModel):
+    category: str = Field("gainers", description="Screening category: gainers, losers, actives, new")
+    limit: int = Field(20, description="Number of results")
+
+
+class PredictionRequest(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=12)
+    period: str = Field("2y")
+    horizons: List[int] = Field(default=[5, 20, 60], min_length=1, max_length=5)
+
+
+class ComprehensiveV1Request(BaseModel):
+    tickers: List[str] = Field(..., min_length=1, max_length=25)
+    period: str = "1y"
+    include_patterns: bool = True
+    include_events: bool = True
+    include_options: bool = True
+    include_seasonal: bool = True
+    include_ml: bool = False
+    include_deep: bool = False
+
+class StrategyRequest(BaseModel):
+    ticker: str = Field(..., description="Ticker symbol")
+    period: str = Field("1y", description="Analysis period")
+
+class MonitorRequest(BaseModel):
+    tickers: List[str] = Field(..., description="List of tickers to monitor")
+
 
 # Health check endpoint
 @app.get("/health")
@@ -234,15 +277,207 @@ async def get_accuracy_trends(ticker: Optional[str] = None, portfolio_id: Option
 # Command history endpoint
 @app.get("/api/commands/history")
 async def get_command_history(limit: int = 50):
-    """Get command execution history"""
+    """Get command execution execution history"""
     try:
         history = engine.get_command_history(limit)
         return {"success": True, "history": history}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Static file serving for frontend (now from frontend/ClariFi/dist)
-frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "ClariFi", "dist")
+# Screener Endpoints
+@app.post("/api/screener")
+async def screen_market(request: ScreenerRequest):
+    """Screen the market for stocks"""
+    try:
+        results = screener.screen_market(request.category, request.limit, json_output=True)
+        return {"success": True, "data": engine._make_json_serializable(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Strategy Endpoints
+@app.post("/api/strategy")
+async def generate_strategy(request: StrategyRequest):
+    """Generate investment strategy for a ticker"""
+    try:
+        stock_data = engine.downloader.download_stock_data(request.ticker, period=request.period)
+        
+        if stock_data is None or stock_data.empty:
+             raise HTTPException(status_code=404, detail=f"No data found for {request.ticker}")
+
+        # Compute technical indicators
+        try:
+            stock_data = stock_data.copy()
+            engine.pattern_analyzer.add_technical_indicators(stock_data, validate=False)
+            last_row = stock_data.iloc[-1]
+            technical_indicators = {
+                'RSI_14': float(last_row['RSI_14']) if 'RSI_14' in last_row and not pd.isna(last_row['RSI_14']) else None,
+                'MACD': float(last_row['MACD']) if 'MACD' in last_row and not pd.isna(last_row['MACD']) else None,
+                'MACD_Signal': float(last_row['MACD_Signal']) if 'MACD_Signal' in last_row and not pd.isna(last_row['MACD_Signal']) else None,
+                'ADX': float(last_row['ADX']) if 'ADX' in last_row and not pd.isna(last_row['ADX']) else None,
+                'Williams_%R': float(last_row['Williams_%R']) if 'Williams_%R' in last_row and not pd.isna(last_row['Williams_%R']) else None,
+                'CCI': float(last_row['CCI']) if 'CCI' in last_row and not pd.isna(last_row['CCI']) else None,
+                'BB_Upper': float(last_row['BB_Upper']) if 'BB_Upper' in last_row and not pd.isna(last_row['BB_Upper']) else None,
+                'BB_Lower': float(last_row['BB_Lower']) if 'BB_Lower' in last_row and not pd.isna(last_row['BB_Lower']) else None,
+                'BB_Middle': float(last_row['BB_Middle']) if 'BB_Middle' in last_row and not pd.isna(last_row['BB_Middle']) else None,
+                'BB_Width': float(last_row['BB_Width']) if 'BB_Width' in last_row and not pd.isna(last_row['BB_Width']) else None,
+                '_last_close': float(last_row['Close']),
+            }
+        except Exception as e:
+            print(f"Warning: Failed to compute technical indicators: {e}")
+            technical_indicators = None
+
+        # Seasonal analysis
+        try:
+            seasonal = engine.seasonal_analyzer.analyze(stock_data)
+        except Exception as e:
+            print(f"Warning: Seasonal analysis failed: {e}")
+            seasonal = None
+
+        strategy = strategy_analyzer.generate_strategy(
+            ticker=request.ticker,
+            data=stock_data,
+            period=request.period,
+            seasonal_analysis=seasonal,
+            deep_analysis=None,
+            technical_indicators=technical_indicators,
+            find_optimum=True
+        )
+        
+        import dataclasses
+        strategy_dict = dataclasses.asdict(strategy)
+        
+        return {"success": True, "strategy": engine._make_json_serializable(strategy_dict)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"Strategy endpoint error:\n{tb}")
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/v1/predictions")
+async def generate_predictions_v1(request: PredictionRequest):
+    """Return validated baseline forecasts using the canonical result envelope."""
+    ticker = request.ticker.strip().upper()
+    try:
+        if any(h < 1 or h > 252 for h in request.horizons):
+            raise ValueError("horizons must be between 1 and 252 trading days")
+        stock_data = engine.downloader.download_stock_data(ticker, period=request.period)
+        if stock_data is None or stock_data.empty:
+            return envelope("prediction.forecast", errors=[error_item(
+                f"No market data found for {ticker}", "NO_DATA", "forecast", ticker
+            )], meta={"ticker": ticker})
+        result = forecast_prices(stock_data, ticker, tuple(request.horizons))
+        return envelope("prediction.forecast", result, meta={
+            "ticker": ticker,
+            "period": request.period,
+            "horizons": request.horizons,
+            "data_as_of": result["as_of"],
+        })
+    except ValueError as exc:
+        return envelope("prediction.forecast", errors=[error_item(str(exc), "INVALID_INPUT", "forecast", ticker)])
+    except Exception as exc:
+        traceback.print_exc()
+        return envelope("prediction.forecast", errors=[error_item(
+            str(exc), "PREDICTION_FAILED", "forecast", ticker, retryable=True
+        )])
+
+
+@app.post("/api/v1/strategy")
+async def generate_strategy_v1(request: StrategyRequest):
+    """Canonical wrapper around the existing explainable strategy analysis."""
+    try:
+        stock_data = engine.downloader.download_stock_data(request.ticker.strip().upper(), period=request.period)
+        if stock_data is None or stock_data.empty:
+            return envelope("strategy.generate", errors=[error_item(
+                "No market data found", "NO_DATA", "strategy", request.ticker
+            )])
+        technical_indicators = {"_last_close": float(stock_data["Close"].iloc[-1])}
+        seasonal = engine.seasonal_analyzer.analyze(stock_data)
+        strategy = strategy_analyzer.generate_strategy(
+            ticker=request.ticker.strip().upper(), data=stock_data, period=request.period,
+            seasonal_analysis=seasonal, technical_indicators=technical_indicators,
+            find_optimum=True,
+        )
+        return envelope("strategy.generate", {"strategy": strategy}, meta={"ticker": request.ticker.upper()})
+    except Exception as exc:
+        traceback.print_exc()
+        return envelope("strategy.generate", errors=[error_item(
+            str(exc), "STRATEGY_FAILED", "strategy", request.ticker
+        )])
+
+
+@app.post("/api/v1/screener")
+async def screen_market_v1(request: ScreenerRequest):
+    """Canonical market-screening response for frontend and API clients."""
+    category = request.category if request.category != "active" else "actives"
+    try:
+        result = screener.screen_market(category, request.limit, json_output=True)
+        return envelope("market.screen", result, meta={"category": category, "limit": request.limit})
+    except Exception as exc:
+        return envelope("market.screen", errors=[error_item(str(exc), "SCREEN_FAILED", "screener")])
+
+
+@app.post("/api/v1/analysis/comprehensive")
+async def comprehensive_analysis_v1(request: ComprehensiveV1Request):
+    """Expose all existing checks through one versioned, JSON-safe contract."""
+    tickers = [ticker.strip().upper() for ticker in request.tickers if ticker.strip()]
+    if not tickers:
+        return envelope("analysis.comprehensive", errors=[error_item(
+            "At least one ticker is required", "INVALID_INPUT", "analysis"
+        )])
+    try:
+        result = engine.comprehensive_analysis(
+            tickers=tickers,
+            period=request.period,
+            save_to_db=False,
+            include_patterns=request.include_patterns,
+            include_events=request.include_events,
+            include_options=request.include_options,
+            include_seasonal=request.include_seasonal,
+            include_ml=request.include_ml,
+            include_deep=request.include_deep,
+        )
+        return envelope("analysis.comprehensive", result, meta={"tickers": tickers, "period": request.period})
+    except Exception as exc:
+        traceback.print_exc()
+        return envelope("analysis.comprehensive", errors=[error_item(
+            str(exc), "ANALYSIS_FAILED", "analysis", retryable=True
+        )])
+
+# Live Monitor Endpoints
+monitoring_active = False
+
+@app.post("/api/live-monitor/start")
+async def start_monitoring(request: MonitorRequest, background_tasks: BackgroundTasks):
+    """Start live monitoring"""
+    global monitoring_active
+    
+    if monitoring_active:
+        # Update tickers if already running
+        live_monitor.add_tickers(request.tickers)
+        return {"success": True, "message": "Updated monitored tickers"}
+    
+    live_monitor.add_tickers(request.tickers)
+    monitoring_active = True
+    
+    # We don't start a blocking loop here. 
+    # Instead, the WebSocket endpoint or a background task will handle updates.
+    # For this architecture, we'll use the WebSocket to drive updates when clients are connected.
+    
+    return {"success": True, "message": "Monitoring configured"}
+
+@app.post("/api/live-monitor/stop")
+async def stop_monitoring():
+    """Stop live monitoring"""
+    global monitoring_active
+    monitoring_active = False
+    return {"success": True, "message": "Monitoring stopped"}
+
+
+# Static file serving for the active lowercase frontend.
+frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "clarifi", "dist")
 
 
 # Serve static assets (Vite build)
@@ -271,6 +506,17 @@ async def serve_frontend():
         return FileResponse(frontend_path)
     else:
         return {"message": "ClariFi API is running", "docs": "/docs", "frontend": "Not built yet"}
+
+
+@app.get("/{path:path}")
+async def spa_fallback(path: str):
+    """Serve Vue history routes while leaving API/static routes to their handlers."""
+    if path.startswith(("api/", "assets/", "static/", "ws")):
+        raise HTTPException(status_code=404, detail="Not found")
+    frontend_path = os.path.join(frontend_dir, "index.html")
+    if os.path.exists(frontend_path):
+        return FileResponse(frontend_path)
+    raise HTTPException(status_code=404, detail="Frontend not built")
 
 
 @app.get("/vite.svg")
@@ -311,10 +557,35 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-            await manager.send_personal_message(f"Message received: {data}", websocket)
+            # Wait for messages from client (e.g., heartbeat or commands)
+            # We use a timeout so we can send updates even if no message received
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                # Handle client messages if needed
+                if data == "ping":
+                    await manager.send_personal_message("pong", websocket)
+            except asyncio.TimeoutError:
+                # No message from client, check if we need to send updates
+                pass
+            
+            # If monitoring is active, fetch and send updates
+            if monitoring_active and live_monitor.tickers:
+                try:
+                    updates = live_monitor.fetch_updates()
+                    if updates:
+                        await manager.broadcast(json.dumps({"type": "price_update", "data": updates}))
+                except Exception as e:
+                    print(f"Error fetching updates: {e}")
+                
+                # Wait a bit to avoid flooding
+                await asyncio.sleep(2)
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = True):

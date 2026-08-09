@@ -84,12 +84,15 @@ class ClariFiEngine:
                 return str(obj)
             elif isinstance(obj, (datetime, timedelta)):
                 return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
-            elif isinstance(obj, (np.integer, int)):
-                return int(obj)
-            elif isinstance(obj, (np.floating, float)):
-                # Handle NaN and infinity
-                val = float(obj)
-                if np.isnan(val) or np.isinf(val):
+            elif isinstance(obj, int):
+                return obj
+            elif isinstance(obj, float):
+                if np.isnan(obj) or np.isinf(obj):
+                    return None
+                return obj
+            elif isinstance(obj, np.generic):
+                val = obj.item()
+                if isinstance(val, float) and (np.isnan(val) or np.isinf(val)):
                     return None
                 return val
             elif isinstance(obj, np.ndarray):

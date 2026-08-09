@@ -15,16 +15,17 @@ const vuetify = createVuetify({
 	components,
 	directives,
 	theme: {
-		defaultTheme: 'light',
+		defaultTheme: 'dark',
 		themes: {
-			light: {
+			dark: {
 				colors: {
-					primary: '#1976D2',
-					secondary: '#424242',
-					accent: '#82B1FF',
+					primary: '#00E5FF',   // Cyan Accent
+					secondary: '#FFD740', // Gold Accent
+					background: '#0F172A', // Deep Blue/Black
+					surface: '#1E293B',    // Slightly lighter blue/black
 					error: '#FF5252',
 					info: '#2196F3',
-					success: '#4CAF50',
+					success: '#00E676',
 					warning: '#FFC107'
 				}
 			}

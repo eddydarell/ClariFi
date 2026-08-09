@@ -30,7 +30,7 @@ pip install -r requirements.txt
 
 # Build the frontend (Vue + Vuetify + Vite)
 echo "🛠️  Building ClariFi frontend (Vite)..."
-cd frontend/ClariFi
+cd frontend/clarifi
 npm install
 npm run build
 cd ../..

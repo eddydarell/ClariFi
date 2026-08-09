@@ -89,6 +89,8 @@ class DatabaseManager:
                     event TEXT NOT NULL,
                     category TEXT NOT NULL,
                     impact TEXT NOT NULL,
+                    summary TEXT,
+                    link TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -103,6 +105,17 @@ class DatabaseManager:
                 cursor.execute('ALTER TABLE portfolio_tickers ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+            # Add summary and link columns to events table if they don't exist
+            try:
+                cursor.execute('ALTER TABLE events ADD COLUMN summary TEXT DEFAULT ""')
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                cursor.execute('ALTER TABLE events ADD COLUMN link TEXT DEFAULT ""')
+            except sqlite3.OperationalError:
+                pass
 
             # Analysis results table
             cursor.execute('''

@@ -530,9 +530,12 @@ class MLAnalyzer:
 
         return DeepAR(input_dim)
 
-    def train_tabnet_model(self, model: nn.Module, X: np.ndarray, y: np.ndarray, task: str) -> MLModelResult:
+    def train_tabnet_model(self, model: Any, X: np.ndarray, y: np.ndarray, task: str) -> MLModelResult:
         """Train TabNet model."""
         # Convert to tensors
+        if not PYTORCH_AVAILABLE:
+            return None
+            
         X_tensor = torch.FloatTensor(X)
         if task == 'classification':
             y_tensor = torch.LongTensor(y)
@@ -577,7 +580,7 @@ class MLAnalyzer:
             model_path=None
         )
 
-    def train_deepar_model(self, model: nn.Module, X: np.ndarray, y: np.ndarray) -> MLModelResult:
+    def train_deepar_model(self, model: Any, X: np.ndarray, y: np.ndarray) -> MLModelResult:
         """Train DeepAR model."""
         # Convert to tensors
         X_tensor = torch.FloatTensor(X)

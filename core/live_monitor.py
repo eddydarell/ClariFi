@@ -119,6 +119,33 @@ class LiveStockMonitor:
                 # Display the price update
                 print(self.format_price_change(ticker, price, self.previous_prices[ticker]))
 
+    def fetch_updates(self) -> List[Dict]:
+        """Fetch updates and return data (for API usage)"""
+        updates = []
+        for ticker in self.tickers:
+            price = self.get_real_time_price(ticker)
+            if price is not None:
+                prev = self.current_prices.get(ticker, 0.0)
+                self.previous_prices[ticker] = prev
+                self.current_prices[ticker] = price
+                
+                # Add to history
+                now = datetime.now()
+                self.price_history[ticker].append((now, price))
+                
+                change = price - prev if prev > 0 else 0.0
+                change_pct = (change / prev) * 100 if prev > 0 else 0.0
+                
+                updates.append({
+                    "ticker": ticker,
+                    "price": price,
+                    "change": change,
+                    "change_pct": change_pct,
+                    "timestamp": now.isoformat()
+                })
+        return updates
+
+
     def clear_screen(self):
         """Clear terminal screen"""
         os.system('cls' if os.name == 'nt' else 'clear')

@@ -125,7 +125,7 @@ RESPONSE_SCHEMA = {
 
 
 class AIAnalyzer:
-    def __init__(self, model: str = "qwen3:latest"):
+    def __init__(self, model: str = "gemma4:latest"):
         self.model = model
 
     # -------------------------- Data Acquisition -------------------------- #

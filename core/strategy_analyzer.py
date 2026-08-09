@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import calendar
+from dataclasses import asdict, is_dataclass
 
 
 @dataclass
@@ -90,6 +91,9 @@ class StrategyAnalyzer:
         """
         if len(data) < self.min_data_points:
             return self._create_insufficient_data_strategy(ticker, data)
+
+        if is_dataclass(seasonal_analysis):
+            seasonal_analysis = asdict(seasonal_analysis)
 
         # Ensure datetime index
         df = data.copy()
@@ -246,6 +250,9 @@ class StrategyAnalyzer:
         if not seasonal_analysis:
             return {'available': False}
 
+        if is_dataclass(seasonal_analysis):
+            seasonal_analysis = asdict(seasonal_analysis)
+
         current_month = datetime.now().month
         next_month = (current_month % 12) + 1
         month_name = calendar.month_name[current_month]
@@ -317,6 +324,23 @@ class StrategyAnalyzer:
         # Market regime
         regime = technical_indicators.get('market_regime', {})
 
+        # Bollinger Band signal
+        bb_upper = technical_indicators.get('BB_Upper')
+        bb_lower = technical_indicators.get('BB_Lower')
+        bb_middle = technical_indicators.get('BB_Middle')
+        bb_width = technical_indicators.get('BB_Width')
+        bb_signal = None
+        if bb_upper and bb_lower and bb_middle:
+            last_close = technical_indicators.get('_last_close')
+            if last_close:
+                bb_position = (last_close - bb_lower) / (bb_upper - bb_lower + 1e-10)
+                if bb_position < 0.1:
+                    bb_signal = 'OVERSOLD'
+                elif bb_position > 0.9:
+                    bb_signal = 'OVERBOUGHT'
+                else:
+                    bb_signal = 'NEUTRAL'
+
         return {
             'available': True,
             'adx': adx,
@@ -324,6 +348,8 @@ class StrategyAnalyzer:
             'williams_r': williams_r,
             'cci': cci,
             'market_regime': regime.get('regime', 'UNKNOWN'),
+            'bb_signal': bb_signal,
+            'bb_width': bb_width,
         }
 
     def _calculate_risk_metrics(self, data: pd.DataFrame) -> Dict[str, float]:
@@ -378,13 +404,13 @@ class StrategyAnalyzer:
         if len(closes) >= 10:
             returns_1w = []
             returns_2w = []
+            for i in range(len(closes) - 7):
+                returns_1w.append((closes.iloc[i+7] / closes.iloc[i] - 1) * 100)
             for i in range(len(closes) - 10):
-                returns_1w.append((closes.iloc[i+5] / closes.iloc[i] - 1) * 100)
-                if i + 10 < len(closes):
-                    returns_2w.append((closes.iloc[i+10] / closes.iloc[i] - 1) * 100)
+                returns_2w.append((closes.iloc[i+10] / closes.iloc[i] - 1) * 100)
             timeframes['1_week'] = {
-                'avg_return': np.mean(returns_1w),
-                'win_rate': sum(1 for r in returns_1w if r > 0) / len(returns_1w) * 100,
+                'avg_return': np.mean(returns_1w) if returns_1w else 0,
+                'win_rate': sum(1 for r in returns_1w if r > 0) / len(returns_1w) * 100 if returns_1w else 50,
             }
             if returns_2w:
                 timeframes['2_week'] = {
@@ -497,6 +523,9 @@ class StrategyAnalyzer:
         if volatility['risk_level'] == 'HIGH':
             score -= 10
             rationale.append(f"High volatility environment")
+        elif volatility['risk_level'] == 'LOW':
+            score += 10
+            rationale.append(f"Low volatility environment")
 
         # Determine action based on score
         if score >= 40:
@@ -739,72 +768,72 @@ class StrategyAnalyzer:
         weight_momentum: float,
         weight_seasonal: float,
     ) -> PricePrediction:
-        """Predict price for a specific timeframe."""
+        """Predict price for a specific timeframe using statistical methods."""
 
         target_date = (datetime.now() + timedelta(days=horizon_days)).strftime('%Y-%m-%d')
 
-        # Initialize prediction components
         trend_prediction = 0.0
         momentum_prediction = 0.0
         seasonal_prediction = 0.0
         reasoning = []
 
-        # Trend-based prediction
-        if timeframe == "short_term":
-            # Use short-term trend
-            if trend['short_term'] == 'BULLISH':
-                trend_prediction = 2.0 if trend['slope_pct'] > 1 else 1.0
-                reasoning.append("Short-term bullish trend")
-            else:
-                trend_prediction = -2.0 if trend['slope_pct'] < -1 else -1.0
-                reasoning.append("Short-term bearish trend")
-        elif timeframe == "mid_term":
-            # Use medium-term trend
-            if trend['medium_term'] == 'BULLISH':
-                trend_prediction = 3.0
-                reasoning.append("Medium-term bullish trend")
-            else:
-                trend_prediction = -3.0
-                reasoning.append("Medium-term bearish trend")
-        else:  # long_term
-            # Use long-term trend
-            if trend['long_term'] == 'BULLISH':
-                trend_prediction = 5.0
-                reasoning.append("Long-term bullish trend")
-            elif trend['long_term'] == 'BEARISH':
-                trend_prediction = -5.0
-                reasoning.append("Long-term bearish trend")
-            else:
-                trend_prediction = 0.0
+        # --- Trend-based prediction via linear regression ---
+        # Use the appropriate lookback for the timeframe
+        lookback_map = {'short_term': 20, 'mid_term': 60, 'long_term': 120}
+        lookback = lookback_map.get(timeframe, 60)
 
-        # Momentum-based prediction
+        # We need the original data for regression, approximate from signals
+        slope_pct = trend.get('slope_pct', 0)
+        # Annualized slope projected to horizon
+        # slope_pct is already a percent change per observed trading row.
+        daily_slope_pct = slope_pct
+        trend_prediction = daily_slope_pct * horizon_days
+
+        # Clamp trend prediction to reasonable bounds
+        max_trend_pct = 15.0 if timeframe == 'long_term' else 8.0 if timeframe == 'mid_term' else 4.0
+        trend_prediction = max(-max_trend_pct, min(max_trend_pct, trend_prediction))
+
+        if trend_prediction > 0.5:
+            reasoning.append(f"{'Strong ' if abs(slope_pct) > 1 else ''}upward trend ({slope_pct:.2f}%/month)")
+        elif trend_prediction < -0.5:
+            reasoning.append(f"{'Strong ' if abs(slope_pct) > 1 else ''}downward trend ({slope_pct:.2f}%/month)")
+
+        # --- Momentum prediction using EMA-weighted signals ---
         rsi = momentum.get('rsi', 50)
+        roc = momentum.get('roc_10_day', 0)
+
+        # RSI mean reversion component (stronger for extreme values)
         if rsi < 30:
-            momentum_prediction = 3.0  # Oversold, expect rebound
-            reasoning.append("Oversold RSI suggests bounce")
+            momentum_prediction = (30 - rsi) * 0.15  # Scale with distance from oversold
+            reasoning.append(f"Oversold RSI ({rsi:.0f}) — mean reversion expected")
         elif rsi > 70:
-            momentum_prediction = -3.0  # Overbought, expect pullback
-            reasoning.append("Overbought RSI suggests pullback")
+            momentum_prediction = (70 - rsi) * 0.15
+            reasoning.append(f"Overbought RSI ({rsi:.0f}) — pullback expected")
         else:
-            # Neutral RSI, use ROC
-            roc = momentum.get('roc_10_day', 0)
-            momentum_prediction = roc * 0.1  # Scale down ROC impact
+            # Linear interpolation: RSI 50 = neutral, moving toward extremes
+            momentum_prediction = (rsi - 50) * 0.05
 
-        # MACD contribution
+        # ROC momentum (exponential decay — recent momentum persists but fades)
+        roc_contribution = roc * 0.2 * np.exp(-horizon_days / 30.0)
+        momentum_prediction += roc_contribution
+
+        # MACD signal with decay
         if momentum.get('macd_signal') == 'BULLISH':
-            momentum_prediction += 1.0
-            reasoning.append("MACD bullish crossover")
+            macd_boost = 1.5 * np.exp(-horizon_days / 20.0)
+            momentum_prediction += macd_boost
+            if timeframe == 'short_term':
+                reasoning.append("MACD bullish crossover")
         elif momentum.get('macd_signal') == 'BEARISH':
-            momentum_prediction -= 1.0
-            reasoning.append("MACD bearish crossover")
+            macd_drop = -1.5 * np.exp(-horizon_days / 20.0)
+            momentum_prediction += macd_drop
+            if timeframe == 'short_term':
+                reasoning.append("MACD bearish crossover")
 
-        # Seasonal-based prediction
-        if seasonal.get('available'):
-            if timeframe == "long_term":
-                # Use seasonal bias for long-term
-                seasonal_bias = seasonal.get('seasonal_bias', 0)
-                seasonal_prediction = seasonal_bias * 10  # Scale to percentage
-
+        # --- Seasonal prediction with decay ---
+        if seasonal and seasonal.get('available'):
+            seasonal_bias = seasonal.get('seasonal_bias', 0)
+            if timeframe == 'long_term':
+                seasonal_prediction = seasonal_bias * 8
                 if seasonal.get('next_is_best'):
                     seasonal_prediction += 2.0
                     reasoning.append("Entering historically strong period")
@@ -812,35 +841,34 @@ class StrategyAnalyzer:
                     seasonal_prediction -= 2.0
                     reasoning.append("Entering historically weak period")
             else:
-                # Use current/next month for shorter terms
                 next_month_return = seasonal.get('next_month_avg_return', 0)
-                seasonal_prediction = next_month_return
+                # Seasonal returns are decimal ratios; prediction components are percent.
+                seasonal_prediction = next_month_return * 100 * 0.5
 
-        # Historical performance from multi-timeframe
-        if timeframe == "short_term" and '5_day' in multi_timeframe:
-            hist_return = multi_timeframe['5_day'].get('avg_return', 0)
-            trend_prediction = (trend_prediction + hist_return) / 2  # Average with historical
-        elif timeframe == "mid_term" and '1_month' in multi_timeframe:
-            hist_return = multi_timeframe['1_month'].get('avg_return', 0)
-            trend_prediction = (trend_prediction + hist_return) / 2
-        elif timeframe == "long_term" and '2_month' in multi_timeframe:
-            hist_return = multi_timeframe['2_month'].get('avg_return', 0)
-            trend_prediction = (trend_prediction + hist_return) / 2
+        # --- Blend with historical forward returns ---
+        hist_key_map = {'short_term': '5_day', 'mid_term': '1_month', 'long_term': '2_month'}
+        hist_key = hist_key_map.get(timeframe)
+        if hist_key and hist_key in multi_timeframe:
+            hist_return = multi_timeframe[hist_key].get('avg_return', 0)
+            # Weighted blend: more weight to statistical prediction for shorter horizons
+            blend_weight = 0.3 if timeframe == 'short_term' else 0.5 if timeframe == 'mid_term' else 0.6
+            trend_prediction = trend_prediction * (1 - blend_weight) + hist_return * blend_weight
 
-        # Combine predictions with weights
+        # --- Combine with configured weights ---
         predicted_change_pct = (
             trend_prediction * weight_trend +
             momentum_prediction * weight_momentum +
             seasonal_prediction * weight_seasonal
         )
 
-        # Apply volatility adjustment
+        # --- Volatility-adjusted confidence intervals ---
         volatility = signals['volatility']
         vol_level = volatility.get('volatility_20d', 25)
+        vol_daily = vol_level / np.sqrt(252)
 
-        # Higher volatility = wider prediction range, lower confidence
+        # Scale prediction magnitude by volatility regime
         if vol_level > 40:
-            predicted_change_pct *= 1.3  # Wider swings in high vol
+            predicted_change_pct *= 1.2
             confidence = 'LOW'
         elif vol_level > 25:
             predicted_change_pct *= 1.1
@@ -848,13 +876,19 @@ class StrategyAnalyzer:
         else:
             confidence = 'HIGH'
 
-        # Adjust confidence based on score strength
+        # --- Confidence refinement ---
         if abs(score) < 30:
             confidence = 'LOW'
-        elif abs(score) >= 60 and confidence == 'HIGH':
-            confidence = 'HIGH'
+        elif abs(score) >= 60:
+            confidence = 'HIGH' if confidence != 'LOW' else 'MEDIUM'
         elif abs(score) >= 40:
             confidence = 'MEDIUM' if confidence == 'LOW' else confidence
+
+        # Reduce confidence for longer horizons
+        if horizon_days > 60 and confidence == 'HIGH':
+            confidence = 'MEDIUM'
+        elif horizon_days > 30 and confidence == 'MEDIUM':
+            pass  # Keep MEDIUM
 
         # Calculate predicted price
         predicted_price = current_price * (1 + predicted_change_pct / 100)
@@ -864,7 +898,11 @@ class StrategyAnalyzer:
         if risk_metrics['max_drawdown'] < -20:
             reasoning.append(f"High drawdown risk ({risk_metrics['max_drawdown']:.1f}%)")
 
-        # Limit reasoning to top 3
+        # Add confidence interval context
+        margin = (vol_daily / 100) * np.sqrt(horizon_days) * current_price
+        if margin > 0:
+            reasoning.append(f"Expected range: ${predicted_price - margin:.2f} – ${predicted_price + margin:.2f}")
+
         reasoning = reasoning[:3]
 
         return PricePrediction(
@@ -935,8 +973,6 @@ class StrategyAnalyzer:
                         'win_rate': stats.get('win_rate', 0),
                         'score': stats.get('avg_return', 0) * stats.get('win_rate', 0) / 100,
                     })
-                    break  # Take first best month
-
             # Find next worst month for selling
             for i in range(1, 13):
                 future_month = ((current_month - 1 + i) % 12) + 1
@@ -954,8 +990,6 @@ class StrategyAnalyzer:
                         'win_rate': stats.get('win_rate', 0),
                         'score': abs(stats.get('avg_return', 0)) * stats.get('win_rate', 0) / 100,
                     })
-                    break
-
         # 2. TECHNICAL ANALYSIS - RSI extremes
         momentum = signals['momentum']
         rsi = momentum.get('rsi', 50)
@@ -1061,6 +1095,42 @@ class StrategyAnalyzer:
                 'score': 1.625,
                 'level': 'Resistance',
             })
+
+        # 6. BOLLINGER BAND SIGNALS
+        technical = signals.get('technical', {})
+        if technical.get('available'):
+            bb_signal = technical.get('bb_signal')
+            bb_width = technical.get('bb_width', 0)
+
+            if bb_signal == 'OVERSOLD':
+                buy_candidates.append({
+                    'type': 'bollinger_buy',
+                    'days_ahead': 0,
+                    'expected_return': 4.0,
+                    'win_rate': 62,
+                    'score': 2.48,
+                    'indicator': 'Bollinger Band oversold',
+                })
+            elif bb_signal == 'OVERBOUGHT':
+                sell_candidates.append({
+                    'type': 'bollinger_sell',
+                    'days_ahead': 0,
+                    'expected_return': -3.0,
+                    'win_rate': 60,
+                    'score': 1.8,
+                    'indicator': 'Bollinger Band overbought',
+                })
+
+            # Squeeze detection — low bandwidth predicts breakout
+            if bb_width is not None and bb_width < 5:
+                buy_candidates.append({
+                    'type': 'squeeze_breakout',
+                    'days_ahead': 0,
+                    'expected_return': 6.0,
+                    'win_rate': 55,
+                    'score': 3.3,
+                    'indicator': 'Bollinger squeeze — breakout imminent',
+                })
 
         # Select best candidate based on score and overall trend
         if overall_bullish and buy_candidates:
@@ -1187,8 +1257,8 @@ class StrategyAnalyzer:
         now = datetime.now()
         current_year = now.year
 
-        # Determine target year
-        if target_month < current_month:
+        # Determine target year — if target month is same as or before current, it's next year
+        if target_month <= current_month:
             target_year = current_year + 1
         else:
             target_year = current_year
