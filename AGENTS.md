@@ -13,7 +13,7 @@
 - `python3 run_clarifi.py` creates/uses root `venv/`, installs requirements, initializes SQLite, CWD to `backend/`, starts `backend/server.py` on **8181**.
 - Direct `python3 backend/server.py` defaults to **8000**; pass `--port 8181` when pairing with Vite.
 - `./start_clarifi.sh` installs Python and npm deps, builds UI, then calls `run_clarifi.py`. Run only from repo root.
-- `./clarifi.sh` invokes `core/main.py` with shared `/Users/eddyntambwe/Dev/scripts-project/venv` (absolute path, non-portable).
+- `./clarifi.sh` uses the repo-local `venv/`; `./clarifi.sh init` creates it and installs `requirements.txt`. Other commands fall back to system `python3` with a warning if `venv/` is missing.
 - `setup_venv.sh` deletes root `venv/` before recreating it.
 
 ## Focused Verification
