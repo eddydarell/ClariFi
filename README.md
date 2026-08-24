@@ -244,6 +244,15 @@ The Strategy Analyzer generates actionable, time-sensitive investment recommenda
 Usage:
 
 ```bash
+# Default: machine-parseable JSON envelope only
+./clarifi.sh strategy AAPL --period 1y
+
+# Pretty human-readable mode
+./clarifi.sh --pretty strategy AAPL --period 1y
+
+# Graphs are opt-in (independent of --pretty)
+./clarifi.sh --pretty --graph strategy AAPL --period 1y
+
 # Basic strategy analysis
 ./clarifi.sh strategy AAPL --period 1y
 
@@ -265,11 +274,23 @@ Usage:
 
 Flags:
 
+- `--pretty`: Human-readable CLI output
+- `--graph`: Enable chart/graph generation (disabled by default)
 - `--period <range>`: Analysis period (default: 1y, recommended: 2y+ for seasonal data)
 - `--no-download`: Use existing data without downloading fresh data
 - `--include-deep`: Enable deep backtesting analysis (increases confidence)
 - `--deep-chunk-months`: Chunk size for deep analysis (default: 3 months)
 - `--optimum`: Find optimal buy/sell moment based on all KPIs and analysis data
+
+Event ingestion:
+
+```bash
+# Inline JSON payload
+./clarifi.sh ingest '{"date":"2026-08-24","event":"Fed commentary","category":"macro","impact":"neutral"}'
+
+# File payload
+./clarifi.sh ingest --file ./ingest/events.json
+```
 
 **Output Components**:
 

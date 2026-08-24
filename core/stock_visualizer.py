@@ -15,12 +15,17 @@ import os
 import argparse
 from datetime import datetime
 import glob
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from database.models import DatabaseManager
 
 
 class StockVisualizer:
     def __init__(self, data_dir="data", output_dir="graphs"):
         self.data_dir = data_dir
         self.output_dir = output_dir
+        self.db = DatabaseManager(os.environ.get("CLARIFI_DB_PATH", "clarifi.db"))
         self.ensure_output_directory()
 
         # Set style for better-looking plots
@@ -37,6 +42,55 @@ class StockVisualizer:
 
     def load_stock_data(self, filepath):
         """Load stock data from CSV file."""
+        ticker_hint = self.extract_ticker_from_filename(filepath)
+        if ticker_hint:
+            db_rows = self.db.get_ticker_prices(ticker_hint.upper())
+            if db_rows:
+                df = pd.DataFrame(db_rows)
+                if not df.empty:
+                    df["price_date"] = pd.to_datetime(df["price_date"])
+                    df = df.set_index("price_date").sort_index()
+                    renamed = df.rename(columns={
+                        "open": "Open",
+                        "high": "High",
+                        "low": "Low",
+                        "close": "Close",
+                        "adj_close": "Adj Close",
+                        "volume": "Volume",
+                    })
+                    required_columns = ['Close', 'High', 'Low', 'Open', 'Volume']
+                    for col in required_columns:
+                        if col not in renamed.columns:
+                            print(f"Warning: Column {col} missing for ticker {ticker_hint}")
+                            return None
+                    return renamed
+
+        if filepath.startswith("db://"):
+            ticker = filepath.replace("db://", "").upper()
+            rows = self.db.get_ticker_prices(ticker)
+            if not rows:
+                print(f"No database price rows found for ticker: {ticker}")
+                return None
+            df = pd.DataFrame(rows)
+            if df.empty:
+                return None
+            df["price_date"] = pd.to_datetime(df["price_date"])
+            df = df.set_index("price_date").sort_index()
+            renamed = df.rename(columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "adj_close": "Adj Close",
+                "volume": "Volume",
+            })
+            required_columns = ['Close', 'High', 'Low', 'Open', 'Volume']
+            for col in required_columns:
+                if col not in renamed.columns:
+                    print(f"Warning: Column {col} missing for ticker {ticker}")
+                    return None
+            return renamed
+
         try:
             # Read the CSV file and handle the multi-level column structure
             data = pd.read_csv(filepath, skiprows=[1, 2], index_col=0, parse_dates=True)
@@ -58,19 +112,41 @@ class StockVisualizer:
             return None
 
     def find_stock_files(self, ticker=None):
-        """Find CSV files for specific ticker or all tickers."""
+        """Find database-backed ticker handles, with CSV fallback."""
         if ticker:
             pattern = os.path.join(self.data_dir, f"{ticker}_*.csv")
-        else:
-            pattern = os.path.join(self.data_dir, "*.csv")
+            csv_files = glob.glob(pattern)
+            if csv_files:
+                return csv_files
+            db_rows = self.db.get_ticker_prices(ticker.upper(), limit=1)
+            if db_rows:
+                return [f"db://{ticker.upper()}"]
+            return []
 
-        files = glob.glob(pattern)
-        return files
+        db_tickers = self.db.get_tickers_with_price_data()
+        pattern = os.path.join(self.data_dir, "*.csv")
+        csv_files = glob.glob(pattern)
+        if csv_files:
+            return csv_files
+        if db_tickers:
+            return [f"db://{ticker}" for ticker in db_tickers]
+        return []
 
     def extract_ticker_from_filename(self, filepath):
         """Extract ticker symbol from filename."""
+        if filepath.startswith("db://"):
+            return filepath.replace("db://", "")
         filename = os.path.basename(filepath)
         return filename.split('_')[0]
+
+    def _select_latest_source(self, files):
+        """Choose latest CSV source, or use DB source handle directly."""
+        if not files:
+            return None
+        db_handles = [entry for entry in files if isinstance(entry, str) and entry.startswith("db://")]
+        if db_handles:
+            return db_handles[0]
+        return max(files, key=os.path.getctime)
 
     def plot_single_stock(self, ticker, save=True, show=False):
         """Create a comprehensive chart for a single stock."""
@@ -81,7 +157,7 @@ class StockVisualizer:
             return None
 
         # Use the most recent file
-        latest_file = max(files, key=os.path.getctime)
+        latest_file = self._select_latest_source(files)
         data = self.load_stock_data(latest_file)
 
         if data is None:
@@ -154,7 +230,7 @@ class StockVisualizer:
         for ticker in tickers:
             files = self.find_stock_files(ticker)
             if files:
-                latest_file = max(files, key=os.path.getctime)
+                latest_file = self._select_latest_source(files)
                 data = self.load_stock_data(latest_file)
                 if data is not None:
                     stock_data[ticker] = data
@@ -235,7 +311,7 @@ class StockVisualizer:
         for ticker in tickers:
             files = self.find_stock_files(ticker)
             if files:
-                latest_file = max(files, key=os.path.getctime)
+                latest_file = self._select_latest_source(files)
                 data = self.load_stock_data(latest_file)
                 if data is not None:
                     stock_data[ticker] = data['Close']

@@ -33,6 +33,65 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute('SELECT id, event_date, event, category, impact, summary, link, created_at FROM events ORDER BY event_date ASC')
             return [dict(row) for row in cursor.fetchall()]
+
+    def upsert_ticker_price_rows(self, ticker: str, rows: List[Dict[str, Any]]) -> int:
+        """Insert or update ticker OHLCV rows."""
+        if not rows:
+            return 0
+        normalized_ticker = ticker.upper()
+        inserted = 0
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            for row in rows:
+                cursor.execute('''
+                    INSERT INTO ticker_prices (
+                        id, ticker, price_date, open, high, low, close, adj_close, volume
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ticker, price_date) DO UPDATE SET
+                        open=excluded.open,
+                        high=excluded.high,
+                        low=excluded.low,
+                        close=excluded.close,
+                        adj_close=excluded.adj_close,
+                        volume=excluded.volume
+                ''', (
+                    str(uuid.uuid4()),
+                    normalized_ticker,
+                    row.get('price_date'),
+                    row.get('open'),
+                    row.get('high'),
+                    row.get('low'),
+                    row.get('close'),
+                    row.get('adj_close'),
+                    row.get('volume'),
+                ))
+                inserted += 1
+            conn.commit()
+        return inserted
+
+    def get_ticker_prices(self, ticker: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Fetch OHLCV rows for ticker ordered by date ascending."""
+        query = '''
+            SELECT ticker, price_date, open, high, low, close, adj_close, volume
+            FROM ticker_prices
+            WHERE ticker = ?
+            ORDER BY price_date ASC
+        '''
+        params: List[Any] = [ticker.upper()]
+        if limit is not None:
+            query += ' LIMIT ?'
+            params.append(limit)
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_tickers_with_price_data(self) -> List[str]:
+        """Get all tickers that have persisted price data."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT DISTINCT ticker FROM ticker_prices ORDER BY ticker ASC')
+            return [row['ticker'] for row in cursor.fetchall()]
     """Manages SQLite database operations for ClariFi"""
 
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -92,6 +151,23 @@ class DatabaseManager:
                     summary TEXT,
                     link TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Ticker OHLCV table (source of truth for historical market data)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ticker_prices (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    price_date TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    adj_close REAL,
+                    volume REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ticker, price_date)
                 )
             ''')
 
@@ -195,6 +271,7 @@ class DatabaseManager:
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_ticker ON analysis_results(ticker)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_prices_lookup ON ticker_prices(ticker, price_date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_portfolio ON analysis_results(portfolio_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_command_history_executed ON command_history(executed_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_comparison_results_ticker ON comparison_results(ticker)')

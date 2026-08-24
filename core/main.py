@@ -12,6 +12,8 @@ import argparse
 import os
 import sys
 import calendar
+import io
+import contextlib
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -396,7 +398,7 @@ class AdvancedStockAnalysis:
         for ticker in tickers:
             files = self.visualizer.find_stock_files(ticker)
             if files:
-                latest_file = max(files, key=os.path.getctime)
+                latest_file = files[0] if len(files) == 1 and str(files[0]).startswith("db://") else max(files, key=os.path.getctime)
                 data = self.visualizer.load_stock_data(latest_file)
                 if data is not None:
                     stock_data_dict[ticker] = data
@@ -2033,44 +2035,92 @@ class AdvancedStockAnalysis:
 
 # Legacy class for backward compatibility
 class StockAnalysis(AdvancedStockAnalysis):
-    def quick_analysis(self, tickers, period="1y", download=True, visualize=True):
+    def quick_analysis(self, tickers, period="1y", download=True, visualize=True, json_output=False):
         """Legacy quick analysis method."""
-        self._print_header("QUICK STOCK ANALYSIS")
-        print(f"📈 Tickers: {', '.join(tickers)}")
-        print(f"⏰ Period: {period}")
-        print()
+        result = {
+            "command": "quick",
+            "tickers": [ticker.upper() for ticker in tickers],
+            "period": period,
+            "download": download,
+            "visualize": visualize,
+            "download_results": {},
+            "visualizations": {
+                "single_charts": {},
+                "comparison_chart": None,
+                "correlation_matrix": None,
+            },
+            "errors": [],
+        }
+
+        if not json_output:
+            self._print_header("QUICK STOCK ANALYSIS")
+            print(f"📈 Tickers: {', '.join(tickers)}")
+            print(f"⏰ Period: {period}")
+            print()
 
         # Download data if requested
         if download:
-            self._print_section_header("DOWNLOADING STOCK DATA")
-            results = self.downloader.download_multiple_stocks(
-                tickers, None, None, period
-            )
+            if not json_output:
+                self._print_section_header("DOWNLOADING STOCK DATA")
+                download_results = self.downloader.download_multiple_stocks(
+                    tickers, None, None, period
+                )
+            else:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    download_results = self.downloader.download_multiple_stocks(
+                        tickers, None, None, period
+                    )
+            result["download_results"] = download_results or {}
 
-            if not results:
-                self._print_error("No data downloaded. Exiting.")
+            if not download_results:
+                error_message = "No data downloaded. Exiting."
+                result["errors"].append(error_message)
+                if json_output:
+                    return result
+                self._print_error(error_message)
                 return
 
-            self._print_success("Data download completed!")
+            if not json_output:
+                self._print_success("Data download completed!")
 
         # Create visualizations if requested
         if visualize:
-            self._print_section_header("CREATING VISUALIZATIONS")
+            if not json_output:
+                self._print_section_header("CREATING VISUALIZATIONS")
 
             # Individual charts for each stock
             for ticker in tickers:
-                print(f"  Creating chart for {ticker}...")
-                self.visualizer.plot_single_stock(ticker, save=True, show=False)
+                if not json_output:
+                    print(f"  Creating chart for {ticker}...")
+                    chart_path = self.visualizer.plot_single_stock(ticker, save=True, show=False)
+                else:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        chart_path = self.visualizer.plot_single_stock(ticker, save=True, show=False)
+                result["visualizations"]["single_charts"][ticker.upper()] = chart_path
 
             # Comparison chart if multiple stocks
             if len(tickers) > 1:
-                print(f"  Creating comparison chart...")
-                self.visualizer.plot_comparison(tickers, save=True, show=False)
+                if not json_output:
+                    print(f"  Creating comparison chart...")
+                    comparison_path = self.visualizer.plot_comparison(tickers, save=True, show=False)
+                    print(f"  Creating correlation matrix...")
+                    correlation_path = self.visualizer.create_correlation_matrix(tickers, save=True, show=False)
+                else:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        comparison_path = self.visualizer.plot_comparison(tickers, save=True, show=False)
+                        correlation_path = self.visualizer.create_correlation_matrix(tickers, save=True, show=False)
+                result["visualizations"]["comparison_chart"] = comparison_path
+                result["visualizations"]["correlation_matrix"] = correlation_path
 
-                print(f"  Creating correlation matrix...")
-                self.visualizer.create_correlation_matrix(tickers, save=True, show=False)
+            if not json_output:
+                self._print_success("Visualizations completed!")
 
-            self._print_success("Visualizations completed!")
+        result["data_dir"] = f"{self.downloader.data_dir}/"
+        result["graphs_dir"] = f"{self.visualizer.output_dir}/"
+        result["status"] = "error" if result["errors"] else "ok"
+
+        if json_output:
+            return result
 
         self._print_success("Analysis completed!")
         print(f"📁 Data files: {self.downloader.data_dir}/")
@@ -2846,12 +2896,16 @@ def main():
 
     try:
         if args.command == 'quick':
-            legacy_analysis.quick_analysis(
+            result = legacy_analysis.quick_analysis(
                 args.tickers,
                 args.period,
                 download=not args.no_download,
-                visualize=not args.no_visualize
+                visualize=not args.no_visualize,
+                json_output=getattr(args, 'json', False)
             )
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(result, indent=2))
 
         elif args.command == 'full':
             # Full analysis with consensus recommendation
@@ -3058,6 +3112,105 @@ def main():
         elif args.command == 'strategy':
             # Generate investment strategy for a single ticker
             ticker = args.ticker.upper()
+            if getattr(args, 'json', False):
+                import json
+                try:
+                    if not args.no_download:
+                        downloader = StockDownloader()
+                        download_result = downloader.download_multiple_stocks([ticker], None, None, args.period)
+                        if not download_result or not download_result.get(ticker):
+                            print(json.dumps({
+                                "command": "strategy",
+                                "ticker": ticker,
+                                "period": args.period,
+                                "errors": [f"Failed to download data for {ticker}"]
+                            }, indent=2))
+                            return
+
+                    files = analysis.visualizer.find_stock_files(ticker)
+                    if not files:
+                        print(json.dumps({
+                            "command": "strategy",
+                            "ticker": ticker,
+                            "period": args.period,
+                            "errors": [f"No data found for {ticker}"]
+                        }, indent=2))
+                        return
+
+                    latest_file = files[0] if len(files) == 1 and str(files[0]).startswith("db://") else max(files, key=os.path.getctime)
+                    data = analysis.visualizer.load_stock_data(latest_file)
+                    if data is None or len(data) < 60:
+                        print(json.dumps({
+                            "command": "strategy",
+                            "ticker": ticker,
+                            "period": args.period,
+                            "errors": [f"Insufficient data for {ticker} (need 60+ points, got {len(data) if data is not None else 0})"]
+                        }, indent=2))
+                        return
+
+                    seasonal_analyzer = SeasonalAnalyzer()
+                    seasonal_result = seasonal_analyzer.analyze(data)
+
+                    pattern_analyzer = PatternAnalyzer()
+                    pattern_analyzer.add_technical_indicators(data)
+                    technical_indicators = {
+                        'ADX': float(data['ADX'].iloc[-1]) if 'ADX' in data.columns and not data['ADX'].isna().iloc[-1] else None,
+                        'RSI_14': float(data['RSI_14'].iloc[-1]) if 'RSI_14' in data.columns and not data['RSI_14'].isna().iloc[-1] else None,
+                        'MACD': float(data['MACD'].iloc[-1]) if 'MACD' in data.columns and not data['MACD'].isna().iloc[-1] else None,
+                        'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in data.columns and not data['MACD_Signal'].isna().iloc[-1] else None,
+                        'Williams_%R': float(data['Williams_%R'].iloc[-1]) if 'Williams_%R' in data.columns and not data['Williams_%R'].isna().iloc[-1] else None,
+                    }
+                    technical_indicators['risk_metrics'] = pattern_analyzer.calculate_risk_metrics(data)
+                    technical_indicators['market_regime'] = pattern_analyzer.detect_market_regime(data)
+
+                    deep_result = None
+                    if args.include_deep:
+                        try:
+                            from engine import ClariFiEngine
+                            engine = ClariFiEngine()
+                            deep_result = engine._run_deep_analysis(
+                                ticker,
+                                data.copy(),
+                                chunk_months=args.deep_chunk_months
+                            )
+                            if deep_result and deep_result.get('error'):
+                                deep_result = None
+                        except Exception:
+                            deep_result = None
+
+                    strategy_analyzer = StrategyAnalyzer()
+                    strategy = strategy_analyzer.generate_strategy(
+                        ticker=ticker,
+                        data=data,
+                        period=args.period,
+                        seasonal_analysis=seasonal_result,
+                        deep_analysis=deep_result,
+                        technical_indicators=technical_indicators,
+                        find_optimum=args.optimum,
+                    )
+
+                    result = {
+                        "command": "strategy",
+                        "ticker": ticker,
+                        "period": args.period,
+                        "include_deep": args.include_deep,
+                        "deep_chunk_months": args.deep_chunk_months,
+                        "optimum": args.optimum,
+                        "strategy": analysis._convert_to_json_serializable(strategy),
+                        "seasonal_analysis": analysis._convert_to_json_serializable(seasonal_result),
+                        "deep_analysis": analysis._convert_to_json_serializable(deep_result),
+                        "data_points": len(data),
+                    }
+                    print(json.dumps(result, indent=2))
+                    return
+                except Exception as e:
+                    print(json.dumps({
+                        "command": "strategy",
+                        "ticker": ticker,
+                        "period": args.period,
+                        "errors": [str(e)]
+                    }, indent=2))
+                    return
 
             analysis._print_header(f"INVESTMENT STRATEGY FOR {ticker}", "🎯")
             print(f"📅 Analysis Period: {args.period}")

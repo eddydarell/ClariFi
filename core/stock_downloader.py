@@ -12,6 +12,9 @@ import sys
 from datetime import datetime, timedelta
 import argparse
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from database.models import DatabaseManager
+
 # Initialize colorama for cross-platform colored output
 try:
     import colorama
@@ -44,6 +47,7 @@ except ImportError:
 class StockDownloader:
     def __init__(self, data_dir="data"):
         self.data_dir = data_dir
+        self.db = DatabaseManager(os.environ.get("CLARIFI_DB_PATH", "clarifi.db"))
         self.ensure_data_directory()
 
     def ensure_data_directory(self):
@@ -92,6 +96,7 @@ class StockDownloader:
 
             # Clean the data
             data = self.clean_data(data)
+            self._persist_to_sqlite(ticker, data)
 
             print(f"Successfully downloaded {len(data)} records for {ticker}")
             return data
@@ -105,6 +110,25 @@ class StockDownloader:
         if data is None or data.empty:
             print(f"No data to save for {ticker}")
             return None
+
+    def _persist_to_sqlite(self, ticker, data):
+        """Persist OHLCV rows so SQLite is the authoritative source."""
+        if data is None or data.empty:
+            return 0
+        normalized = data.copy()
+        normalized.index = pd.to_datetime(normalized.index)
+        rows = []
+        for idx, row in normalized.iterrows():
+            rows.append({
+                "price_date": idx.strftime("%Y-%m-%d"),
+                "open": float(row["Open"]) if "Open" in row and pd.notna(row["Open"]) else None,
+                "high": float(row["High"]) if "High" in row and pd.notna(row["High"]) else None,
+                "low": float(row["Low"]) if "Low" in row and pd.notna(row["Low"]) else None,
+                "close": float(row["Close"]) if "Close" in row and pd.notna(row["Close"]) else None,
+                "adj_close": float(row["Adj Close"]) if "Adj Close" in row and pd.notna(row["Adj Close"]) else None,
+                "volume": float(row["Volume"]) if "Volume" in row and pd.notna(row["Volume"]) else None,
+            })
+        return self.db.upsert_ticker_price_rows(ticker, rows)
 
         # Generate filename
         if start_date and end_date:
@@ -150,7 +174,7 @@ class StockDownloader:
             data = self.download_stock_data(ticker, start_date, end_date, period)
             if data is not None:
                 filepath = self.save_to_csv(data, ticker, start_date, end_date)
-                results[ticker] = filepath
+                results[ticker] = filepath if filepath else f"db://{ticker.upper()}"
 
         return results
 
