@@ -27,6 +27,7 @@ from core.stock_screener import StockScreener
 from core.strategy_analyzer import StrategyAnalyzer
 from core.live_monitor import LiveStockMonitor
 from core.forecast_engine import forecast_prices
+from core.prediction_tracker import PredictionTracker
 from core.result_schema import envelope, error_item, to_jsonable
 
 # Initialize FastAPI app
@@ -50,6 +51,7 @@ engine = ClariFiEngine()
 screener = StockScreener()
 strategy_analyzer = StrategyAnalyzer()
 live_monitor = LiveStockMonitor()
+prediction_tracker = PredictionTracker(engine.db_manager)
 
 
 # Pydantic models for request/response
@@ -345,9 +347,21 @@ async def generate_strategy(request: StrategyRequest):
         
         import dataclasses
         strategy_dict = dataclasses.asdict(strategy)
-        
-        return {"success": True, "strategy": engine._make_json_serializable(strategy_dict)}
-        
+
+        try:
+            prediction_tracking = prediction_tracker.process_run(
+                ticker=request.ticker, entry_price=strategy.entry_price, predictions=strategy.predictions
+            )
+        except Exception as e:
+            print(f"Warning: prediction tracking failed: {e}")
+            prediction_tracking = None
+
+        return {
+            "success": True,
+            "strategy": engine._make_json_serializable(strategy_dict),
+            "prediction_tracking": engine._make_json_serializable(prediction_tracking) if prediction_tracking else None,
+        }
+
     except HTTPException:
         raise
     except Exception as e:
@@ -400,7 +414,16 @@ async def generate_strategy_v1(request: StrategyRequest):
             seasonal_analysis=seasonal, technical_indicators=technical_indicators,
             find_optimum=True,
         )
-        return envelope("strategy.generate", {"strategy": strategy}, meta={"ticker": request.ticker.upper()})
+        try:
+            prediction_tracking = prediction_tracker.process_run(
+                ticker=request.ticker.strip().upper(), entry_price=strategy.entry_price,
+                predictions=strategy.predictions,
+            )
+        except Exception as e:
+            print(f"Warning: prediction tracking failed: {e}")
+            prediction_tracking = None
+        return envelope("strategy.generate", {"strategy": strategy, "prediction_tracking": prediction_tracking},
+                       meta={"ticker": request.ticker.upper()})
     except Exception as exc:
         traceback.print_exc()
         return envelope("strategy.generate", errors=[error_item(

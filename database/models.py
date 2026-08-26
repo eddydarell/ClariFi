@@ -103,6 +103,9 @@ class DatabaseManager:
         """Context manager for database connections"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA synchronous=NORMAL')  # safe pairing with WAL
+        conn.execute('PRAGMA foreign_keys=ON')
         try:
             yield conn
         finally:
@@ -170,6 +173,10 @@ class DatabaseManager:
                     UNIQUE(ticker, price_date)
                 )
             ''')
+
+            # events.event_date lookups drive correlation range queries
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_category ON events(category)')
 
             # Add current_price and updated_at columns if they don't exist (for existing databases)
             try:
@@ -268,6 +275,30 @@ class DatabaseManager:
                 )
             ''')
 
+            # Ticker predictions table - per-horizon price/trend forecasts scored against
+            # realized prices once each horizon's target date has passed.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ticker_predictions (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    horizon TEXT NOT NULL,  -- 1_week, 1_month, 3_month, 6_month, 1_year
+                    run_id TEXT,
+                    entry_price REAL NOT NULL,
+                    predicted_price REAL NOT NULL,
+                    predicted_change_pct REAL NOT NULL,
+                    predicted_trend TEXT NOT NULL,  -- UP, DOWN, FLAT
+                    confidence TEXT NOT NULL,
+                    target_date TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    resolved INTEGER NOT NULL DEFAULT 0,
+                    actual_price REAL,
+                    actual_change_pct REAL,
+                    actual_trend TEXT,
+                    accuracy_score INTEGER,  -- +1 accurate, -1 inaccurate
+                    resolved_at TIMESTAMP
+                )
+            ''')
+
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_ticker ON analysis_results(ticker)')
@@ -277,6 +308,8 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_comparison_results_ticker ON comparison_results(ticker)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_portfolio ON portfolio_transactions(portfolio_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_ticker ON portfolio_transactions(ticker)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_ticker ON ticker_predictions(ticker)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_due ON ticker_predictions(ticker, resolved, target_date)')
 
             conn.commit()
 
@@ -1039,3 +1072,167 @@ class ComparisonResult:
             ''', params)
 
             return [dict(row) for row in cursor.fetchall()]
+
+
+class TickerPrediction:
+    """Tracks per-horizon price/trend predictions and scores them once realized.
+
+    Each ticker run stores a forecast for 1 week, 1 month, 3 months, 6 months and
+    1 year ahead. On later runs, any prediction whose target date has passed is
+    resolved against the observed price and awarded a +1 (accurate) or -1
+    (inaccurate) score, which rolls up into a per-ticker confidence indicator.
+    """
+
+    HORIZONS = ("1_week", "1_month", "3_month", "6_month", "1_year")
+    TREND_FLAT_THRESHOLD_PCT = 1.0  # |change%| below this is considered FLAT
+    TOLERANCE_BY_HORIZON = {
+        "1_week": 5.0,
+        "1_month": 8.0,
+        "3_month": 12.0,
+        "6_month": 18.0,
+        "1_year": 25.0,
+    }
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+
+    @classmethod
+    def classify_trend(cls, change_pct: float) -> str:
+        """Classify a percentage price change into UP/DOWN/FLAT."""
+        if change_pct > cls.TREND_FLAT_THRESHOLD_PCT:
+            return "UP"
+        if change_pct < -cls.TREND_FLAT_THRESHOLD_PCT:
+            return "DOWN"
+        return "FLAT"
+
+    def save_predictions(self, ticker: str, entry_price: float,
+                        predictions: Dict[str, Dict[str, Any]],
+                        run_id: Optional[str] = None) -> List[str]:
+        """Persist one row per tracked horizon for this analysis run."""
+        ticker = ticker.upper()
+        ids: List[str] = []
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            for horizon in self.HORIZONS:
+                pred = predictions.get(horizon)
+                if not pred:
+                    continue
+                prediction_id = str(uuid.uuid4())
+                predicted_change_pct = pred["predicted_change_pct"]
+                cursor.execute('''
+                    INSERT INTO ticker_predictions
+                    (id, ticker, horizon, run_id, entry_price, predicted_price,
+                     predicted_change_pct, predicted_trend, confidence, target_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    prediction_id, ticker, horizon, run_id, entry_price,
+                    pred["predicted_price"], predicted_change_pct,
+                    self.classify_trend(predicted_change_pct), pred["confidence"],
+                    pred["target_date"],
+                ))
+                ids.append(prediction_id)
+            conn.commit()
+        return ids
+
+    def get_due_predictions(self, ticker: str, as_of: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch unresolved predictions whose target date has already passed."""
+        as_of = as_of or datetime.now().strftime('%Y-%m-%d')
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM ticker_predictions
+                WHERE ticker = ? AND resolved = 0 AND target_date <= ?
+                ORDER BY target_date ASC
+            ''', (ticker.upper(), as_of))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def resolve_prediction(self, prediction_id: str, actual_price: float, entry_price: float,
+                          predicted_trend: str, horizon: str) -> Dict[str, Any]:
+        """Score a due prediction against the observed actual price."""
+        actual_change_pct = ((actual_price - entry_price) / entry_price) * 100 if entry_price else 0.0
+        actual_trend = self.classify_trend(actual_change_pct)
+
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT predicted_change_pct FROM ticker_predictions WHERE id = ?', (prediction_id,))
+            row = cursor.fetchone()
+            predicted_change_pct = row['predicted_change_pct'] if row else 0.0
+
+            tolerance = self.TOLERANCE_BY_HORIZON.get(horizon, 10.0)
+            price_error_pct = abs(actual_change_pct - predicted_change_pct)
+            accurate = (actual_trend == predicted_trend) and (price_error_pct <= tolerance)
+            accuracy_score = 1 if accurate else -1
+
+            cursor.execute('''
+                UPDATE ticker_predictions
+                SET resolved = 1, actual_price = ?, actual_change_pct = ?, actual_trend = ?,
+                    accuracy_score = ?, resolved_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (actual_price, actual_change_pct, actual_trend, accuracy_score, prediction_id))
+            conn.commit()
+
+        return {
+            "id": prediction_id,
+            "actual_price": actual_price,
+            "actual_change_pct": actual_change_pct,
+            "actual_trend": actual_trend,
+            "price_error_pct": price_error_pct,
+            "accurate": accurate,
+            "accuracy_score": accuracy_score,
+        }
+
+    def get_recent(self, ticker: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Fetch recent predictions (resolved or pending) for a ticker."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM ticker_predictions WHERE ticker = ?
+                ORDER BY created_at DESC LIMIT ?
+            ''', (ticker.upper(), limit))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_confidence_summary(self, ticker: str) -> Dict[str, Any]:
+        """Aggregate resolved prediction scores into a confidence indicator per horizon."""
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT horizon,
+                       COUNT(*) as resolved_count,
+                       SUM(CASE WHEN accuracy_score = 1 THEN 1 ELSE 0 END) as correct_count,
+                       SUM(accuracy_score) as score_sum
+                FROM ticker_predictions
+                WHERE ticker = ? AND resolved = 1
+                GROUP BY horizon
+            ''', (ticker.upper(),))
+
+            by_horizon: Dict[str, Any] = {}
+            total_score = 0
+            total_resolved = 0
+            total_correct = 0
+            for row in cursor.fetchall():
+                r = dict(row)
+                accuracy_rate = (r['correct_count'] / r['resolved_count']) if r['resolved_count'] else None
+                by_horizon[r['horizon']] = {
+                    "resolved_count": r['resolved_count'],
+                    "correct_count": r['correct_count'],
+                    "score": r['score_sum'],
+                    "accuracy_rate": accuracy_rate,
+                }
+                total_score += r['score_sum'] or 0
+                total_resolved += r['resolved_count']
+                total_correct += r['correct_count']
+
+            cursor.execute('''
+                SELECT COUNT(*) as pending FROM ticker_predictions WHERE ticker = ? AND resolved = 0
+            ''', (ticker.upper(),))
+            pending = cursor.fetchone()['pending']
+
+        return {
+            "ticker": ticker.upper(),
+            "confidence_score": total_score,
+            "resolved_count": total_resolved,
+            "correct_count": total_correct,
+            "overall_accuracy_rate": (total_correct / total_resolved) if total_resolved else None,
+            "pending_count": pending,
+            "by_horizon": by_horizon,
+        }

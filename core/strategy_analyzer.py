@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import calendar
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 
 
 @dataclass
@@ -751,6 +751,56 @@ class StrategyAnalyzer:
         )
         predictions['long_term'] = long_term
 
+        # Tracked horizons used for accuracy scoring (week/month/3mo/6mo/1yr).
+        # 1_month and 3_month reuse the mid/long-term computations (30/90 days match exactly).
+        predictions['1_week'] = self._predict_timeframe(
+            timeframe="1_week",
+            horizon_days=7,
+            current_price=current_price,
+            signals=signals,
+            multi_timeframe=multi_timeframe,
+            seasonal=seasonal,
+            score=score,
+            trend=trend,
+            momentum=momentum,
+            weight_trend=0.6,
+            weight_momentum=0.3,
+            weight_seasonal=0.1,
+            bucket='short_term',
+        )
+        predictions['1_month'] = replace(mid_term, timeframe='1_month')
+        predictions['3_month'] = replace(long_term, timeframe='3_month')
+        predictions['6_month'] = self._predict_timeframe(
+            timeframe="6_month",
+            horizon_days=180,
+            current_price=current_price,
+            signals=signals,
+            multi_timeframe=multi_timeframe,
+            seasonal=seasonal,
+            score=score,
+            trend=trend,
+            momentum=momentum,
+            weight_trend=0.25,
+            weight_momentum=0.15,
+            weight_seasonal=0.6,
+            bucket='long_term',
+        )
+        predictions['1_year'] = self._predict_timeframe(
+            timeframe="1_year",
+            horizon_days=365,
+            current_price=current_price,
+            signals=signals,
+            multi_timeframe=multi_timeframe,
+            seasonal=seasonal,
+            score=score,
+            trend=trend,
+            momentum=momentum,
+            weight_trend=0.2,
+            weight_momentum=0.1,
+            weight_seasonal=0.7,
+            bucket='long_term',
+        )
+
         return predictions
 
     def _predict_timeframe(
@@ -767,8 +817,15 @@ class StrategyAnalyzer:
         weight_trend: float,
         weight_momentum: float,
         weight_seasonal: float,
+        bucket: Optional[str] = None,
     ) -> PricePrediction:
-        """Predict price for a specific timeframe using statistical methods."""
+        """Predict price for a specific timeframe using statistical methods.
+
+        `bucket` selects which internal weighting/clamp regime to use
+        (short_term/mid_term/long_term) when `timeframe` is a tracked-horizon
+        label (e.g. "1_week") rather than one of those three literal buckets.
+        """
+        bucket = bucket or timeframe
 
         target_date = (datetime.now() + timedelta(days=horizon_days)).strftime('%Y-%m-%d')
 
@@ -780,7 +837,7 @@ class StrategyAnalyzer:
         # --- Trend-based prediction via linear regression ---
         # Use the appropriate lookback for the timeframe
         lookback_map = {'short_term': 20, 'mid_term': 60, 'long_term': 120}
-        lookback = lookback_map.get(timeframe, 60)
+        lookback = lookback_map.get(bucket, 60)
 
         # We need the original data for regression, approximate from signals
         slope_pct = trend.get('slope_pct', 0)
@@ -790,7 +847,12 @@ class StrategyAnalyzer:
         trend_prediction = daily_slope_pct * horizon_days
 
         # Clamp trend prediction to reasonable bounds
-        max_trend_pct = 15.0 if timeframe == 'long_term' else 8.0 if timeframe == 'mid_term' else 4.0
+        max_trend_pct = 15.0 if bucket == 'long_term' else 8.0 if bucket == 'mid_term' else 4.0
+        # Wider horizons within the long-term bucket get proportionally more room to move
+        if horizon_days > 270:
+            max_trend_pct = 30.0
+        elif horizon_days > 150:
+            max_trend_pct = 20.0
         trend_prediction = max(-max_trend_pct, min(max_trend_pct, trend_prediction))
 
         if trend_prediction > 0.5:
@@ -821,18 +883,18 @@ class StrategyAnalyzer:
         if momentum.get('macd_signal') == 'BULLISH':
             macd_boost = 1.5 * np.exp(-horizon_days / 20.0)
             momentum_prediction += macd_boost
-            if timeframe == 'short_term':
+            if bucket == 'short_term':
                 reasoning.append("MACD bullish crossover")
         elif momentum.get('macd_signal') == 'BEARISH':
             macd_drop = -1.5 * np.exp(-horizon_days / 20.0)
             momentum_prediction += macd_drop
-            if timeframe == 'short_term':
+            if bucket == 'short_term':
                 reasoning.append("MACD bearish crossover")
 
         # --- Seasonal prediction with decay ---
         if seasonal and seasonal.get('available'):
             seasonal_bias = seasonal.get('seasonal_bias', 0)
-            if timeframe == 'long_term':
+            if bucket == 'long_term':
                 seasonal_prediction = seasonal_bias * 8
                 if seasonal.get('next_is_best'):
                     seasonal_prediction += 2.0
@@ -847,11 +909,11 @@ class StrategyAnalyzer:
 
         # --- Blend with historical forward returns ---
         hist_key_map = {'short_term': '5_day', 'mid_term': '1_month', 'long_term': '2_month'}
-        hist_key = hist_key_map.get(timeframe)
+        hist_key = hist_key_map.get(bucket)
         if hist_key and hist_key in multi_timeframe:
             hist_return = multi_timeframe[hist_key].get('avg_return', 0)
             # Weighted blend: more weight to statistical prediction for shorter horizons
-            blend_weight = 0.3 if timeframe == 'short_term' else 0.5 if timeframe == 'mid_term' else 0.6
+            blend_weight = 0.3 if bucket == 'short_term' else 0.5 if bucket == 'mid_term' else 0.6
             trend_prediction = trend_prediction * (1 - blend_weight) + hist_return * blend_weight
 
         # --- Combine with configured weights ---

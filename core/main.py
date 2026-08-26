@@ -60,6 +60,7 @@ try:
     from stock_screener import StockScreener
     from alphavantage_analyzer import AlphaVantageAnalyzer
     from strategy_analyzer import StrategyAnalyzer
+    from prediction_tracker import PredictionTracker
     # Import ML analyzer with fallback
     try:
         from ml_analyzer import MLAnalyzer
@@ -117,6 +118,23 @@ class AdvancedStockAnalysis:
             self.rl_analyzer = RLAnalyzer() if RLAnalyzer else None
         except Exception:
             self.rl_analyzer = None
+
+    def _persist_prediction_tracking(self, ticker, entry_price, predictions, db_manager=None):
+        """Persist strategy predictions to the database for later scoring."""
+        try:
+            tracker = PredictionTracker(db_manager=db_manager) if db_manager else PredictionTracker()
+            return tracker.process_run(
+                ticker=ticker,
+                entry_price=entry_price,
+                predictions=predictions,
+            )
+        except Exception as exc:
+            return {
+                "resolved": [],
+                "new_prediction_ids": [],
+                "confidence": {},
+                "error": str(exc),
+            }
 
     def analyze_multi_timeframe(self, ticker, periods=['1mo', '3mo', '6mo', '1y']):
         """
@@ -806,7 +824,35 @@ class AdvancedStockAnalysis:
                     self._print_warning("Deep analysis requires the ClariFiEngine module")
                 result["errors"].append(error_msg)
 
-        # Step 7: Generate Summary Report
+        # Step 7: Persist prediction tracking for each ticker
+        for ticker in tickers:
+            if ticker not in stock_data_dict:
+                continue
+            try:
+                strategy_analyzer = StrategyAnalyzer()
+                strategy = strategy_analyzer.generate_strategy(
+                    ticker=ticker,
+                    data=stock_data_dict[ticker],
+                    period=period,
+                    seasonal_analysis=seasonal_results.get(ticker) if isinstance(seasonal_results, dict) else None,
+                    deep_analysis=deep_results.get(ticker) if isinstance(deep_results, dict) else None,
+                    technical_indicators=technical_results.get(ticker),
+                    find_optimum=False,
+                )
+                tracking_result = self._persist_prediction_tracking(
+                    ticker=ticker,
+                    entry_price=strategy.entry_price,
+                    predictions=strategy.predictions,
+                )
+                if tracking_result.get('new_prediction_ids'):
+                    result.setdefault('prediction_tracking', {})[ticker] = {
+                        'stored_prediction_ids': tracking_result['new_prediction_ids'],
+                        'confidence': tracking_result.get('confidence', {}),
+                    }
+            except Exception as exc:
+                result.setdefault('errors', []).append(f"Prediction tracking failed for {ticker}: {str(exc)}")
+
+        # Step 8: Generate Summary Report
         if not json_output:
             self._print_section_header("GENERATING ANALYSIS SUMMARY")
             self._generate_summary_report(tickers, correlation_results, volatility_results,
@@ -3189,6 +3235,19 @@ def main():
                         find_optimum=args.optimum,
                     )
 
+                    try:
+                        prediction_tracking = analysis._persist_prediction_tracking(
+                            ticker=ticker,
+                            entry_price=strategy.entry_price,
+                            predictions=strategy.predictions,
+                        )
+                        if prediction_tracking.get('new_prediction_ids'):
+                            print(f"✓ Stored {len(prediction_tracking['new_prediction_ids'])} prediction rows")
+                        elif prediction_tracking.get('error'):
+                            print(f"⚠️  Prediction tracking failed: {prediction_tracking['error']}")
+                    except Exception:
+                        prediction_tracking = None
+
                     result = {
                         "command": "strategy",
                         "ticker": ticker,
@@ -3199,6 +3258,7 @@ def main():
                         "strategy": analysis._convert_to_json_serializable(strategy),
                         "seasonal_analysis": analysis._convert_to_json_serializable(seasonal_result),
                         "deep_analysis": analysis._convert_to_json_serializable(deep_result),
+                        "prediction_tracking": analysis._convert_to_json_serializable(prediction_tracking),
                         "data_points": len(data),
                     }
                     print(json.dumps(result, indent=2))
@@ -3332,6 +3392,20 @@ def main():
                 find_optimum=args.optimum,
             )
 
+            try:
+                prediction_tracking = self._persist_prediction_tracking(
+                    ticker=ticker,
+                    entry_price=strategy.entry_price,
+                    predictions=strategy.predictions,
+                )
+                if prediction_tracking.get('new_prediction_ids'):
+                    print(f"✓ Stored {len(prediction_tracking['new_prediction_ids'])} prediction rows")
+                elif prediction_tracking.get('error'):
+                    print(f"⚠️  Prediction tracking failed: {prediction_tracking['error']}")
+            except Exception as e:
+                prediction_tracking = None
+                print(f"⚠️  Prediction tracking failed: {e}")
+
             # Display strategy
             print()
             print("=" * 70)
@@ -3424,6 +3498,24 @@ def main():
                     if lt.reasoning:
                         print(f"     💡 Key Factors: {', '.join(lt.reasoning)}")
                     print()
+
+            # Display prediction tracking / confidence indicators
+            if prediction_tracking:
+                confidence = prediction_tracking.get("confidence") or {}
+                resolved = prediction_tracking.get("resolved") or []
+                print("📈 PREDICTION TRACK RECORD:")
+                if resolved:
+                    print(f"  ✓ Resolved {len(resolved)} past prediction(s) this run:")
+                    for r in resolved:
+                        mark = "✅" if r.get("accurate") else "❌"
+                        print(f"     {mark} {r['horizon']}: predicted {r.get('predicted_trend', '?')}, "
+                              f"actual {r['actual_trend']} (${r['actual_price']:.2f})")
+                overall_rate = confidence.get("overall_accuracy_rate")
+                rate_str = f"{overall_rate:.0%}" if overall_rate is not None else "N/A"
+                print(f"  🎯 Confidence Score: {confidence.get('confidence_score', 0)} "
+                      f"({confidence.get('resolved_count', 0)} resolved, {rate_str} accurate, "
+                      f"{confidence.get('pending_count', 0)} pending)")
+                print()
 
             # Display optimal moment if requested
             if args.optimum and strategy.optimal_moment:
