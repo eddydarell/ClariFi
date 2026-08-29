@@ -27,6 +27,7 @@ from advanced_visualizer import AdvancedVisualizer
 from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
 from seasonal_analyzer import SeasonalAnalyzer
 from ml_analyzer import MLAnalyzer
+from strategy_analyzer import StrategyAnalyzer
 
 
 class ClariFiEngine:
@@ -611,6 +612,8 @@ class ClariFiEngine:
                 try:
                     print(f"\n🔍 Analyzing {ticker}...")
                     ticker_results = {}
+                    seasonal_data = None
+                    deep_result = None
 
                     # Download data
                     print(f"📥 Downloading data for {ticker}...")
@@ -714,6 +717,22 @@ class ClariFiEngine:
                         except Exception as e:
                             print(f"⚠️  Deep analysis failed HERE for {ticker}: {str(e)}")
                             ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
+
+                    # Strategy combines the current analysis inputs into future BUY,
+                    # SELL, and hold-period price recommendations.
+                    try:
+                        strategy = StrategyAnalyzer().generate_strategy(
+                            ticker=ticker,
+                            data=stock_data,
+                            period=period,
+                            seasonal_analysis=seasonal_data,
+                            deep_analysis=deep_result,
+                            find_optimum=True,
+                        )
+                        ticker_results["strategy"] = self._make_json_serializable(strategy)
+                    except Exception as e:
+                        print(f"⚠️  Strategy generation failed for {ticker}: {str(e)}")
+                        ticker_results["strategy"] = {"error": f"Strategy generation failed: {str(e)}"}
 
                     # Generate overall recommendation
                     try:

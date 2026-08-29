@@ -115,11 +115,22 @@ class TestPredictions:
         for key in ('short_term', 'mid_term', 'long_term'):
             pred = result.predictions[key]
             assert hasattr(pred, 'predicted_price')
+            assert hasattr(pred, 'price_lower_bound')
+            assert hasattr(pred, 'price_upper_bound')
             assert hasattr(pred, 'confidence')
             assert hasattr(pred, 'reasoning')
             assert isinstance(pred.predicted_price, (int, float))
             assert isinstance(pred.confidence, str)
             assert isinstance(pred.reasoning, list)
+
+    def test_predictions_include_fixed_ten_percent_price_bounds(self, analyzer):
+        data = make_price_data(100, 5, num_days=120)
+        result = analyzer.generate_strategy("TEST", data)
+
+        for key in ('short_term', 'mid_term', 'long_term'):
+            prediction = result.predictions[key]
+            assert prediction.price_lower_bound == pytest.approx(prediction.predicted_price * 0.90)
+            assert prediction.price_upper_bound == pytest.approx(prediction.predicted_price * 1.10)
 
     def test_predicted_price_is_positive(self, analyzer):
         data = make_price_data(100, 5, num_days=120)
@@ -179,7 +190,18 @@ class TestOptimalMoment:
         date_str = result.optimal_moment.optimal_date
 
         parsed = datetime.strptime(date_str, '%Y-%m-%d')
+        assert parsed.date() > datetime.now().date()
         assert parsed <= datetime.now() + pd.Timedelta(days=366)
+
+    def test_buy_and_sell_optimal_moments_are_future_dates(self, analyzer):
+        data = make_price_data(100, 15, num_days=120, volatility=0.005)
+        result = analyzer.generate_strategy("TEST", data, find_optimum=True)
+
+        assert set(result.optimal_moments) == {'buy', 'sell'}
+        for moment in result.optimal_moments.values():
+            assert moment.action in {'BUY', 'SELL'}
+            assert moment.days_from_now >= 1
+            assert datetime.strptime(moment.optimal_date, '%Y-%m-%d').date() > datetime.now().date()
 
 
 class TestRSIExtremes:

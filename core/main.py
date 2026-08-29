@@ -824,7 +824,10 @@ class AdvancedStockAnalysis:
                     self._print_warning("Deep analysis requires the ClariFiEngine module")
                 result["errors"].append(error_msg)
 
-        # Step 7: Persist prediction tracking for each ticker
+        # Step 7: Generate strategy recommendations and persist their predictions.
+        result["analyses"]["strategy"] = {}
+        if not json_output:
+            self._print_section_header("STRATEGY TIMING & HOLD FORECASTS")
         for ticker in tickers:
             if ticker not in stock_data_dict:
                 continue
@@ -837,8 +840,22 @@ class AdvancedStockAnalysis:
                     seasonal_analysis=seasonal_results.get(ticker) if isinstance(seasonal_results, dict) else None,
                     deep_analysis=deep_results.get(ticker) if isinstance(deep_results, dict) else None,
                     technical_indicators=technical_results.get(ticker),
-                    find_optimum=False,
+                    find_optimum=True,
                 )
+                result["analyses"]["strategy"][ticker] = self._convert_to_json_serializable(strategy)
+                if not json_output:
+                    print(f"  {ticker}: {strategy.action} ({strategy.timeframe}, {strategy.confidence} confidence)")
+                    for timeframe in ('short_term', 'mid_term', 'long_term'):
+                        prediction = strategy.predictions.get(timeframe)
+                        if prediction:
+                            print(
+                                f"    {timeframe}: ${prediction.predicted_price:.2f} "
+                                f"(${prediction.price_lower_bound:.2f}-${prediction.price_upper_bound:.2f})"
+                            )
+                    for action in ('buy', 'sell'):
+                        moment = strategy.optimal_moments.get(action)
+                        if moment:
+                            print(f"    {moment.action}: {moment.optimal_date} ({moment.days_from_now} days)")
                 tracking_result = self._persist_prediction_tracking(
                     ticker=ticker,
                     entry_price=strategy.entry_price,
@@ -850,6 +867,7 @@ class AdvancedStockAnalysis:
                         'confidence': tracking_result.get('confidence', {}),
                     }
             except Exception as exc:
+                result["analyses"]["strategy"][ticker] = {'error': str(exc)}
                 result.setdefault('errors', []).append(f"Prediction tracking failed for {ticker}: {str(exc)}")
 
         # Step 8: Generate Summary Report
@@ -3112,6 +3130,25 @@ def main():
                         print("└─────────┴──────────────┴────────────┴─────────────┴─────────────────┘")
                     else:
                         print("└─────────┴──────────────┴────────────┴─────────────┘")
+
+                    if not args.summary_only and not getattr(args, 'json', False):
+                        print("\n🎯 Strategy Timing & Hold Forecasts:")
+                        for tk, data in result['results'].items():
+                            strategy = data.get('strategy', {})
+                            if not strategy or strategy.get('error'):
+                                continue
+                            print(f"  {tk}: {strategy.get('action', 'HOLD')} ({strategy.get('timeframe', 'N/A')})")
+                            for timeframe in ('short_term', 'mid_term', 'long_term'):
+                                prediction = strategy.get('predictions', {}).get(timeframe)
+                                if prediction:
+                                    print(
+                                        f"    {timeframe}: ${prediction['predicted_price']:.2f} "
+                                        f"(${prediction['price_lower_bound']:.2f}-${prediction['price_upper_bound']:.2f})"
+                                    )
+                            for action in ('buy', 'sell'):
+                                moment = strategy.get('optimal_moments', {}).get(action)
+                                if moment:
+                                    print(f"    {moment['action']}: {moment['optimal_date']} ({moment['days_from_now']} days)")
 
                     if not args.summary_only and not getattr(args, 'json', False):
                         import json

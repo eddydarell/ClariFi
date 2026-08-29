@@ -9,7 +9,7 @@ actionable strategies like "BUY now and SELL in 2 days" or "HOLD for 2 months".
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import calendar
 from dataclasses import asdict, is_dataclass, replace
@@ -37,6 +37,8 @@ class PricePrediction:
     target_date: str  # Predicted date
     predicted_price: float  # Predicted price
     predicted_change_pct: float  # Predicted percentage change
+    price_lower_bound: float  # Fixed -10% margin from predicted price
+    price_upper_bound: float  # Fixed +10% margin from predicted price
     confidence: str  # HIGH, MEDIUM, LOW
     reasoning: List[str]  # Factors contributing to prediction
 
@@ -56,6 +58,7 @@ class StrategyRecommendation:
     key_metrics: Dict[str, any]  # Supporting metrics
     predictions: Dict[str, PricePrediction]  # Short/mid/long-term predictions
     optimal_moment: Optional['OptimalMoment'] = None  # Optimal buy/sell timing
+    optimal_moments: Dict[str, OptimalMoment] = field(default_factory=dict)
 
 
 class StrategyAnalyzer:
@@ -123,18 +126,37 @@ class StrategyAnalyzer:
             technical_indicators=technical_indicators,
         )
 
-        # Find optimal moment if requested
+        # Find independent, future opportunities for both actions when requested.
         if find_optimum:
-            optimal_moment = self._find_optimal_moment(
-                ticker=ticker,
-                data=df,
-                current_price=current_price,
-                signals=signals,
-                multi_timeframe=multi_timeframe,
-                seasonal_analysis=seasonal_analysis,
-                deep_analysis=deep_analysis,
-            )
-            strategy.optimal_moment = optimal_moment
+            strategy.optimal_moments = {
+                'buy': self._find_optimal_moment(
+                    ticker=ticker,
+                    data=df,
+                    current_price=current_price,
+                    signals=signals,
+                    multi_timeframe=multi_timeframe,
+                    seasonal_analysis=seasonal_analysis,
+                    deep_analysis=deep_analysis,
+                    preferred_action='BUY',
+                ),
+                'sell': self._find_optimal_moment(
+                    ticker=ticker,
+                    data=df,
+                    current_price=current_price,
+                    signals=signals,
+                    multi_timeframe=multi_timeframe,
+                    seasonal_analysis=seasonal_analysis,
+                    deep_analysis=deep_analysis,
+                    preferred_action='SELL',
+                ),
+            }
+            strategy.optimal_moment = strategy.optimal_moments.get(strategy.action.lower())
+            if strategy.optimal_moment is None:
+                strategy.optimal_moment = self._create_default_optimal_moment(
+                    action='HOLD',
+                    current_price=current_price,
+                    signals=signals,
+                )
 
         return strategy
 
@@ -973,6 +995,8 @@ class StrategyAnalyzer:
             target_date=target_date,
             predicted_price=predicted_price,
             predicted_change_pct=predicted_change_pct,
+            price_lower_bound=predicted_price * 0.90,
+            price_upper_bound=predicted_price * 1.10,
             confidence=confidence,
             reasoning=reasoning,
         )
@@ -986,6 +1010,7 @@ class StrategyAnalyzer:
         multi_timeframe: Dict[str, any],
         seasonal_analysis: Optional[Dict],
         deep_analysis: Optional[Dict],
+        preferred_action: Optional[str] = None,
     ) -> OptimalMoment:
         """
         Identify the optimal buy/sell moment based on comprehensive analysis.
@@ -1194,8 +1219,17 @@ class StrategyAnalyzer:
                     'indicator': 'Bollinger squeeze — breakout imminent',
                 })
 
-        # Select best candidate based on score and overall trend
-        if overall_bullish and buy_candidates:
+        # Select the requested action independently, or preserve the primary strategy
+        # selection when this method is called without an action preference.
+        if preferred_action == 'BUY':
+            candidates = buy_candidates
+            action = 'BUY'
+            best_candidate = max(candidates, key=lambda x: x['score']) if candidates else None
+        elif preferred_action == 'SELL':
+            candidates = sell_candidates
+            action = 'SELL'
+            best_candidate = max(candidates, key=lambda x: x['score']) if candidates else None
+        elif overall_bullish and buy_candidates:
             best_candidate = max(buy_candidates, key=lambda x: x['score'])
             action = 'BUY'
             candidates = buy_candidates
@@ -1213,13 +1247,20 @@ class StrategyAnalyzer:
             else:
                 # No clear optimal moment
                 return self._create_default_optimal_moment(
-                    action='HOLD',
+                    action=preferred_action or 'HOLD',
                     current_price=current_price,
                     signals=signals,
                 )
 
+        if best_candidate is None:
+            return self._create_default_optimal_moment(
+                action=action,
+                current_price=current_price,
+                signals=signals,
+            )
+
         # Calculate optimal date
-        days_ahead = best_candidate.get('days_ahead', 0)
+        days_ahead = max(best_candidate.get('days_ahead', 0), 1)
         optimal_date = (datetime.now() + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
 
         # Expected price at optimal moment
@@ -1336,8 +1377,8 @@ class StrategyAnalyzer:
         """Create a default optimal moment when no clear signal exists."""
         return OptimalMoment(
             action=action,
-            optimal_date=datetime.now().strftime('%Y-%m-%d'),
-            days_from_now=0,
+            optimal_date=(datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d'),
+            days_from_now=1,
             expected_price=current_price,
             expected_return_pct=0.0,
             confidence='LOW',
