@@ -20,6 +20,7 @@ from database.models import DatabaseManager, Portfolio, AnalysisResult, CommandH
 
 # Import existing analysis modules
 from stock_downloader import StockDownloader
+from market_quote_provider import MarketQuoteProvider
 from stock_visualizer import StockVisualizer
 from pattern_analyzer import PatternAnalyzer
 from event_correlator import EventCorrelator
@@ -43,6 +44,7 @@ class ClariFiEngine:
 
         # Initialize analysis modules
         self.downloader = StockDownloader()
+        self.quote_provider = MarketQuoteProvider()
         self.visualizer = StockVisualizer()
         self.pattern_analyzer = PatternAnalyzer()
         self.event_correlator = EventCorrelator()
@@ -314,14 +316,10 @@ class ClariFiEngine:
                 try:
                     print(f"📥 Fetching current price for {ticker}...")
 
-                    # Download recent data (1 day to get latest price)
-                    stock_data = self.downloader.download_stock_data(ticker, None, None, period="1d")
+                    quote = self.quote_provider.get_quote(ticker)
+                    latest_price = quote["price"]
 
-                    if stock_data is not None and not stock_data.empty:
-                        # Get the most recent closing price
-                        latest_price = float(stock_data['Close'].iloc[-1])
-
-                        # Update the price in database
+                    if latest_price is not None:
                         update_success = self.portfolio_model.update_ticker_price(
                             portfolio_id, ticker, latest_price
                         )
@@ -332,10 +330,14 @@ class ClariFiEngine:
                                 "previous_price": ticker_data.get("current_price", 0.0),
                                 "current_price": latest_price,
                                 "price_change": latest_price - ticker_data.get("current_price", 0.0),
-                                "price_change_pct": ((latest_price / ticker_data.get("current_price", latest_price)) - 1) * 100 if ticker_data.get("current_price", 0) > 0 else 0.0
+                                "price_change_pct": ((latest_price / ticker_data.get("current_price", latest_price)) - 1) * 100 if ticker_data.get("current_price", 0) > 0 else 0.0,
+                                "quote_provider": quote["provider"],
+                                "quote_freshness": quote["freshness"],
+                                "quote_timestamp": quote["timestamp"],
+                                "quote_cached": quote["cached"],
                             }
                             successful_syncs += 1
-                            print(f"✅ {ticker}: ${latest_price:.2f}")
+                            print(f"✅ {ticker}: ${latest_price:.2f} ({quote['freshness']})")
                         else:
                             sync_results[ticker] = {
                                 "success": False,
@@ -345,7 +347,9 @@ class ClariFiEngine:
                     else:
                         sync_results[ticker] = {
                             "success": False,
-                            "error": "No price data available"
+                            "error": "No price data available",
+                            "quote_provider": quote["provider"],
+                            "quote_freshness": quote["freshness"],
                         }
                         failed_syncs += 1
                         print(f"❌ {ticker}: Failed to fetch price data")

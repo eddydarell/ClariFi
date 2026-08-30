@@ -73,6 +73,25 @@ pip install -r requirements.txt
 python3 run_clarifi.py
 ```
 
+## Current Quotes
+
+Historical OHLCV downloads continue to use yfinance. For current US stock and ETF
+quotes, configure a free Twelve Data API key in `.env` or the environment:
+
+```bash
+TWELVE_DATA_API_KEY=your_key_here
+CLARIFI_QUOTE_CACHE_TTL_SECONDS=300
+```
+
+Twelve Data Basic currently allows 8 API credits per minute and 800 per day, with
+real-time US equities and ETFs. The default five-minute cache keeps a 10-symbol
+watchlist within that daily budget during a regular US market session. The live
+monitor may refresh its display every five seconds, but it reuses cached quotes.
+
+International symbols fall back to yfinance delayed or end-of-day data and are
+reported as `delayed_or_end_of_day`; they are not presented as real-time. Real-time
+international coverage requires a provider plan with the applicable exchange data.
+
 ## 🏗️ Architecture
 
 ### Directory Structure

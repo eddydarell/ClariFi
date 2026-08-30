@@ -13,7 +13,6 @@ from typing import Dict, List, Optional, Tuple
 import json
 
 try:
-    import yfinance as yf
     import matplotlib.pyplot as plt
     import numpy as np
     from colorama import Fore, Back, Style, init
@@ -21,8 +20,11 @@ try:
 except ImportError as e:
     print(f"Error importing required modules: {e}")
     print("Install missing packages:")
-    print("pip install yfinance matplotlib numpy colorama plotext")
+    print("pip install matplotlib numpy colorama plotext")
     sys.exit(1)
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from market_quote_provider import MarketQuoteProvider
 
 # Initialize colorama for cross-platform color support
 init(autoreset=True)
@@ -40,6 +42,7 @@ class LiveStockMonitor:
         self.update_interval = 5  # seconds
         self.max_history_points = 100
         self.running = False
+        self.quote_provider = MarketQuoteProvider()
 
     def add_ticker(self, ticker: str):
         """Add a ticker to monitor"""
@@ -56,20 +59,12 @@ class LiveStockMonitor:
             self.add_ticker(ticker)
 
     def get_real_time_price(self, ticker: str) -> Optional[float]:
-        """Get real-time price for a ticker using yfinance"""
-        try:
-            stock = yf.Ticker(ticker)
-            # Get the most recent price from 1-minute data
-            data = stock.history(period="1d", interval="1m")
-            if not data.empty:
-                return float(data['Close'].iloc[-1])
-            else:
-                # Fallback to regular info
-                info = stock.info
-                return float(info.get('regularMarketPrice', 0.0))
-        except Exception as e:
-            print(f"Error fetching price for {ticker}: {e}")
-            return None
+        """Get a cached quote, preferring Twelve Data when configured."""
+        quote = self.quote_provider.get_quote(ticker)
+        price = quote["price"]
+        if price is None:
+            print(f"Error fetching price for {ticker}: no quote available")
+        return price
 
     def format_price_change(self, ticker: str, current_price: float, previous_price: float) -> str:
         """Format price with color coding based on change"""
