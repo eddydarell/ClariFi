@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -18,9 +19,31 @@ sys.path.append(str(ROOT))
 from database.models import DatabaseManager  # noqa: E402
 
 
-def _emit(payload: dict[str, Any]) -> int:
-    print(json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
-    return 0
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\U0001FC00-\U0001FFFD\u2600-\u27BF\uFE0F\u200D]"
+)
+
+
+def _sanitize_output(value: Any) -> Any:
+    """Remove terminal decoration and emoji from every CLI-visible value."""
+    if isinstance(value, str):
+        return EMOJI.sub("", ANSI_ESCAPE.sub("", value))
+    if isinstance(value, list):
+        return [_sanitize_output(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _sanitize_output(item) for key, item in value.items()}
+    return value
+
+
+def _emit(payload: dict[str, Any], *, indent: int | None = None, exit_code: int = 0) -> int:
+    print(json.dumps(
+        _sanitize_output(payload),
+        indent=indent,
+        separators=None if indent is not None else (",", ":"),
+        ensure_ascii=True,
+    ))
+    return exit_code
 
 
 def _ok(engine: str, data: Any) -> dict[str, Any]:
@@ -74,8 +97,13 @@ def _normalize_delegated_payload(command: str, delegated: Any, raw_stdout: str) 
     if delegated is not None:
         return _ok(command, delegated)
     if raw_stdout.strip():
-        return _ok(command, {"raw_output": raw_stdout.strip()})
-    return _ok(command, {})
+        return _err(
+            command,
+            "INVALID_ENGINE_OUTPUT",
+            "Engine did not produce a complete JSON result",
+            {"stdout": raw_stdout.strip()},
+        )
+    return _err(command, "EMPTY_ENGINE_OUTPUT", "Engine produced no result")
 
 
 def _apply_graph_defaults(args: list[str], pretty: bool, graph: bool) -> list[str]:
@@ -181,18 +209,34 @@ def main() -> int:
     argv = sys.argv[1:]
     pretty = False
     graph = False
+    indent: int | None = None
     delegated_args: list[str] = []
-    for token in argv:
+    index = 0
+    while index < len(argv):
+        token = argv[index]
         if token == "--pretty":
             pretty = True
+            index += 1
+            continue
+        if token == "--output":
+            if index + 1 >= len(argv) or argv[index + 1] not in {"json", "text"}:
+                return _emit(_err("cli", "INVALID_ARGUMENT", "--output must be json or text"), exit_code=2)
+            pretty = argv[index + 1] == "text"
+            index += 2
+            continue
+        if token == "--indent":
+            indent = 2
+            index += 1
             continue
         if token == "--graph":
             graph = True
+            index += 1
             continue
         delegated_args.append(token)
+        index += 1
 
     if not delegated_args:
-        return _emit(_err("cli", "MISSING_COMMAND", "No command provided."))
+        return _emit(_err("cli", "MISSING_COMMAND", "No command provided."), indent=indent, exit_code=2)
 
     command = delegated_args[0]
     delegated_args = _apply_graph_defaults(delegated_args, pretty=pretty, graph=graph)
@@ -200,32 +244,34 @@ def main() -> int:
         if pretty:
             print("Graph generation skipped (pass --graph to enable).")
             return 0
-        return _emit(_ok("visualize", {"skipped": True, "reason": "graph_disabled"}))
+        return _emit(_ok("visualize", {"skipped": True, "reason": "graph_disabled"}), indent=indent)
 
     if command == "ingest":
         try:
             payload = _run_ingest(delegated_args[1:])
             if pretty:
-                print(json.dumps(payload, indent=2))
+                print(json.dumps(_sanitize_output(payload), indent=2))
                 return 0
-            return _emit(payload)
+            return _emit(payload, indent=indent)
         except json.JSONDecodeError as exc:
-            return _emit(_err("ingest", "INVALID_JSON", f"Invalid JSON payload: {exc}"))
+            return _emit(_err("ingest", "INVALID_JSON", f"Invalid JSON payload: {exc}"), indent=indent, exit_code=2)
         except Exception as exc:
-            return _emit(_err("ingest", "INGEST_ERROR", str(exc)))
+            return _emit(_err("ingest", "INGEST_ERROR", str(exc)), indent=indent, exit_code=5)
 
     rc, stdout, stderr = _delegate_to_legacy(delegated_args, pretty=pretty)
     if pretty:
-        sys.stdout.write(stdout)
-        sys.stderr.write(stderr)
+        sys.stdout.write(_sanitize_output(stdout))
+        sys.stderr.write(_sanitize_output(stderr))
         return rc
 
     parsed = _extract_json(stdout)
     if rc != 0:
         message = (stderr or stdout or "Command failed").strip()
-        return _emit(_err(command, "ENGINE_ERROR", message))
+        return _emit(_err(command, "ENGINE_ERROR", message), indent=indent, exit_code=5)
+    if "--help" in delegated_args or "-h" in delegated_args:
+        return _emit(_ok(command, {"help": stdout.strip()}), indent=indent)
     payload = _normalize_delegated_payload(command, parsed, stdout)
-    return _emit(payload)
+    return _emit(payload, indent=indent, exit_code=0 if payload["status"] == "ok" else 5)
 
 
 if __name__ == "__main__":
