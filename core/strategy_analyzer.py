@@ -37,8 +37,8 @@ class PricePrediction:
     target_date: str  # Predicted date
     predicted_price: float  # Predicted price
     predicted_change_pct: float  # Predicted percentage change
-    price_lower_bound: float  # Fixed -10% margin from predicted price
-    price_upper_bound: float  # Fixed +10% margin from predicted price
+    price_lower_bound: float  # Volatility- and horizon-adjusted lower bound
+    price_upper_bound: float  # Volatility- and horizon-adjusted upper bound
     confidence: str  # HIGH, MEDIUM, LOW
     reasoning: List[str]  # Factors contributing to prediction
 
@@ -59,6 +59,11 @@ class StrategyRecommendation:
     predictions: Dict[str, PricePrediction]  # Short/mid/long-term predictions
     optimal_moment: Optional['OptimalMoment'] = None  # Optimal buy/sell timing
     optimal_moments: Dict[str, OptimalMoment] = field(default_factory=dict)
+    evidence_tags: List[str] = field(default_factory=list)
+    evidence_score: int = 0
+    decision_status: str = 'HOLD'
+    gate_reasons: List[str] = field(default_factory=list)
+    empirical_validation: Dict[str, any] = field(default_factory=dict)
 
 
 class StrategyAnalyzer:
@@ -66,6 +71,26 @@ class StrategyAnalyzer:
 
     def __init__(self):
         self.min_data_points = 60  # Minimum required data points
+
+    def create_suppressed_strategy(
+        self, ticker: str, reasons: List[str], data_as_of: Optional[str] = None
+    ) -> StrategyRecommendation:
+        """Return a non-actionable result when market data fails validation."""
+        return StrategyRecommendation(
+            ticker=ticker,
+            action='HOLD',
+            timeframe='N/A',
+            target_date=data_as_of or datetime.now().strftime('%Y-%m-%d'),
+            confidence='LOW',
+            rationale=['Strategy suppressed because market data failed validation', *reasons],
+            entry_price=0.0,
+            expected_return_pct=None,
+            risk_level='UNKNOWN',
+            key_metrics={},
+            predictions={},
+            decision_status='SUPPRESSED',
+            gate_reasons=reasons,
+        )
 
     def generate_strategy(
         self,
@@ -76,6 +101,7 @@ class StrategyAnalyzer:
         deep_analysis: Optional[Dict] = None,
         technical_indicators: Optional[Dict] = None,
         find_optimum: bool = False,
+        evidence_threshold: int = 2,
     ) -> StrategyRecommendation:
         """
         Generate a comprehensive investment strategy for a single ticker.
@@ -124,6 +150,7 @@ class StrategyAnalyzer:
             seasonal_analysis=seasonal_analysis,
             deep_analysis=deep_analysis,
             technical_indicators=technical_indicators,
+            evidence_threshold=max(0, int(evidence_threshold)),
         )
 
         # Find independent, future opportunities for both actions when requested.
@@ -469,6 +496,7 @@ class StrategyAnalyzer:
         seasonal_analysis: Optional[Dict],
         deep_analysis: Optional[Dict],
         technical_indicators: Optional[Dict],
+        evidence_threshold: int,
     ) -> StrategyRecommendation:
         """Synthesize all signals into a coherent strategy."""
 
@@ -557,6 +585,16 @@ class StrategyAnalyzer:
         else:
             action = 'HOLD'
 
+        evidence_tags = self._collect_evidence_tags(action, signals)
+        gate_reasons: List[str] = []
+        decision_status = 'ACTIONABLE' if action in {'BUY', 'SELL'} else 'HOLD'
+        if action in {'BUY', 'SELL'} and len(evidence_tags) < evidence_threshold:
+            gate_reasons.append(
+                f"Insufficient independent evidence ({len(evidence_tags)}/{evidence_threshold})"
+            )
+            action = 'HOLD'
+            decision_status = 'SUPPRESSED'
+
         # Determine timeframe based on multi-timeframe analysis
         timeframe, target_date, expected_return = self._determine_optimal_timeframe(
             action, multi_timeframe, seasonal, trend
@@ -575,6 +613,7 @@ class StrategyAnalyzer:
             rationale.insert(0, f"SELL signal (score: {score}/100)")
         else:
             rationale.insert(0, f"HOLD signal (score: {score}/100) - Mixed signals")
+        rationale.extend(gate_reasons)
 
         # Add risk context
         risk_metrics = signals['risk_metrics']
@@ -610,7 +649,52 @@ class StrategyAnalyzer:
                 'risk_metrics': risk_metrics,
             },
             predictions=predictions,
+            evidence_tags=evidence_tags,
+            evidence_score=len(evidence_tags),
+            decision_status=decision_status,
+            gate_reasons=gate_reasons,
         )
+
+    def _collect_evidence_tags(self, action: str, signals: Dict[str, any]) -> List[str]:
+        """Return independent signal groups that support an actionable direction."""
+        if action not in {'BUY', 'SELL'}:
+            return []
+
+        trend = signals['trend']
+        momentum = signals['momentum']
+        seasonal = signals['seasonal']
+        deep = signals['deep_backtest']
+        volatility = signals['volatility']
+        technical = signals['technical']
+        tags: List[str] = []
+
+        if action == 'BUY' and trend['short_term'] == trend['medium_term'] == 'BULLISH':
+            tags.append('trend_bullish')
+        elif action == 'SELL' and trend['short_term'] == trend['medium_term'] == 'BEARISH':
+            tags.append('trend_bearish')
+
+        if action == 'BUY' and (momentum['rsi_signal'] == 'OVERSOLD' or momentum['macd_signal'] == 'BULLISH'):
+            tags.append('momentum_bullish')
+        elif action == 'SELL' and (momentum['rsi_signal'] == 'OVERBOUGHT' or momentum['macd_signal'] == 'BEARISH'):
+            tags.append('momentum_bearish')
+
+        if action == 'BUY' and seasonal.get('available') and seasonal.get('next_is_best'):
+            tags.append('seasonal_tailwind')
+        elif action == 'SELL' and seasonal.get('available') and seasonal.get('next_is_worst'):
+            tags.append('seasonal_headwind')
+
+        if deep.get('available') and deep.get('reliable'):
+            latest_performance = deep.get('latest_performance')
+            if action == 'BUY' and latest_performance and latest_performance > 5:
+                tags.append('backtest_bullish')
+            elif action == 'SELL' and latest_performance and latest_performance < -5:
+                tags.append('backtest_bearish')
+
+        if volatility['risk_level'] == 'LOW':
+            tags.append('volatility_acceptable')
+        if technical.get('trend_strength') == 'STRONG':
+            tags.append('technical_strength')
+        return tags
 
     def _determine_optimal_timeframe(
         self,
@@ -995,8 +1079,8 @@ class StrategyAnalyzer:
             target_date=target_date,
             predicted_price=predicted_price,
             predicted_change_pct=predicted_change_pct,
-            price_lower_bound=predicted_price * 0.90,
-            price_upper_bound=predicted_price * 1.10,
+            price_lower_bound=max(0.01, predicted_price - margin),
+            price_upper_bound=predicted_price + margin,
             confidence=confidence,
             reasoning=reasoning,
         )

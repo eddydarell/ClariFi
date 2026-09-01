@@ -8,6 +8,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.main import AdvancedStockAnalysis
+from core.prediction_tracker import PredictionTracker
+from core.strategy_analyzer import StrategyAnalyzer
 from database.models import DatabaseManager
 
 
@@ -34,8 +36,6 @@ def make_price_data(start_price=100.0, daily_change_pct=5.0, num_days=120):
 def test_analysis_persistence_helper_writes_prediction_rows(tmp_path):
     analysis = AdvancedStockAnalysis()
     data = make_price_data()
-    from core.strategy_analyzer import StrategyAnalyzer
-
     strategy = StrategyAnalyzer().generate_strategy('TEST', data)
     db_path = tmp_path / 'test_predictions.db'
     db_manager = DatabaseManager(db_path=str(db_path))
@@ -55,3 +55,33 @@ def test_analysis_persistence_helper_writes_prediction_rows(tmp_path):
         cursor = conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM ticker_predictions WHERE ticker = ?', ('TEST',))
         assert cursor.fetchone()[0] == 5
+
+
+def test_tracker_persists_recommendation_provenance(tmp_path):
+    data = make_price_data()
+    strategy = StrategyAnalyzer().generate_strategy('TEST', data)
+    db_manager = DatabaseManager(db_path=str(tmp_path / 'provenance.db'))
+    tracker = PredictionTracker(db_manager)
+
+    tracker.process_run(
+        ticker='TEST', entry_price=strategy.entry_price, predictions=strategy.predictions,
+        provenance={
+            'decision_status': 'SUPPRESSED',
+            'evidence_tags': ['trend_bullish', 'volatility_acceptable'],
+            'data_quality': {'status': 'PASSED', 'valid': True},
+            'empirical_validation': {'status': 'FAILED', 'actionable': False},
+            'policy_version': 'swing-v1',
+        },
+    )
+
+    with db_manager.get_connection() as conn:
+        row = conn.execute('''
+            SELECT decision_status, evidence_tags, data_quality, empirical_validation, policy_version
+            FROM ticker_predictions WHERE ticker = ? LIMIT 1
+        ''', ('TEST',)).fetchone()
+
+    assert row['decision_status'] == 'SUPPRESSED'
+    assert row['policy_version'] == 'swing-v1'
+    assert row['evidence_tags'] == '["trend_bullish", "volatility_acceptable"]'
+    assert '"status": "PASSED"' in row['data_quality']
+    assert '"status": "FAILED"' in row['empirical_validation']

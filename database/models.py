@@ -289,6 +289,11 @@ class DatabaseManager:
                     predicted_trend TEXT NOT NULL,  -- UP, DOWN, FLAT
                     confidence TEXT NOT NULL,
                     target_date TEXT NOT NULL,
+                    decision_status TEXT,
+                    evidence_tags TEXT,
+                    data_quality TEXT,
+                    empirical_validation TEXT,
+                    policy_version TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     resolved INTEGER NOT NULL DEFAULT 0,
                     actual_price REAL,
@@ -298,6 +303,18 @@ class DatabaseManager:
                     resolved_at TIMESTAMP
                 )
             ''')
+
+            for column_name, column_type in (
+                ('decision_status', 'TEXT'),
+                ('evidence_tags', 'TEXT'),
+                ('data_quality', 'TEXT'),
+                ('empirical_validation', 'TEXT'),
+                ('policy_version', 'TEXT'),
+            ):
+                try:
+                    cursor.execute(f'ALTER TABLE ticker_predictions ADD COLUMN {column_name} {column_type}')
+                except sqlite3.OperationalError:
+                    pass
 
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)')
@@ -1107,9 +1124,11 @@ class TickerPrediction:
 
     def save_predictions(self, ticker: str, entry_price: float,
                         predictions: Dict[str, Dict[str, Any]],
-                        run_id: Optional[str] = None) -> List[str]:
+                        run_id: Optional[str] = None,
+                        provenance: Optional[Dict[str, Any]] = None) -> List[str]:
         """Persist one row per tracked horizon for this analysis run."""
         ticker = ticker.upper()
+        provenance = provenance or {}
         ids: List[str] = []
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -1122,13 +1141,19 @@ class TickerPrediction:
                 cursor.execute('''
                     INSERT INTO ticker_predictions
                     (id, ticker, horizon, run_id, entry_price, predicted_price,
-                     predicted_change_pct, predicted_trend, confidence, target_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     predicted_change_pct, predicted_trend, confidence, target_date,
+                     decision_status, evidence_tags, data_quality, empirical_validation, policy_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     prediction_id, ticker, horizon, run_id, entry_price,
                     pred["predicted_price"], predicted_change_pct,
                     self.classify_trend(predicted_change_pct), pred["confidence"],
                     pred["target_date"],
+                    provenance.get('decision_status'),
+                    json.dumps(provenance.get('evidence_tags', [])),
+                    json.dumps(provenance.get('data_quality', {})),
+                    json.dumps(provenance.get('empirical_validation', {})),
+                    provenance.get('policy_version'),
                 ))
                 ids.append(prediction_id)
             conn.commit()

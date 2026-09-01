@@ -28,6 +28,7 @@ from core.strategy_analyzer import StrategyAnalyzer
 from core.live_monitor import LiveStockMonitor
 from core.forecast_engine import forecast_prices
 from core.prediction_tracker import PredictionTracker
+from core.recommendation_validation import validate_forecast_evidence, validate_market_data
 from core.result_schema import envelope, error_item, to_jsonable
 
 # Initialize FastAPI app
@@ -102,6 +103,13 @@ class ComprehensiveV1Request(BaseModel):
 class StrategyRequest(BaseModel):
     ticker: str = Field(..., description="Ticker symbol")
     period: str = Field("1y", description="Analysis period")
+    evidence_threshold: int = Field(
+        2, ge=0, le=10,
+        description="Minimum independent signals required before BUY or SELL is actionable",
+    )
+    minimum_walk_forward_observations: int = Field(3, ge=1, le=100)
+    minimum_directional_accuracy: float = Field(0.55, ge=0.5, le=1.0)
+    max_data_age_days: int = Field(7, ge=0, le=30)
 
 class MonitorRequest(BaseModel):
     tickers: List[str] = Field(..., description="List of tickers to monitor")
@@ -306,6 +314,19 @@ async def generate_strategy(request: StrategyRequest):
         if stock_data is None or stock_data.empty:
              raise HTTPException(status_code=404, detail=f"No data found for {request.ticker}")
 
+        data_quality = validate_market_data(stock_data, request.max_data_age_days)
+        if not data_quality['valid']:
+            strategy = strategy_analyzer.create_suppressed_strategy(
+                request.ticker, data_quality['reasons'], data_quality.get('data_as_of')
+            )
+            return {
+                "success": True,
+                "strategy": engine._make_json_serializable(strategy),
+                "data_quality": data_quality,
+                "prediction_tracking": None,
+                "decision_support_only": True,
+            }
+
         # Compute technical indicators
         try:
             stock_data = stock_data.copy()
@@ -342,15 +363,31 @@ async def generate_strategy(request: StrategyRequest):
             seasonal_analysis=seasonal,
             deep_analysis=None,
             technical_indicators=technical_indicators,
-            find_optimum=True
+            find_optimum=True,
+            evidence_threshold=request.evidence_threshold,
         )
+        forecast = forecast_prices(stock_data, request.ticker, (5, 20, 60))
+        strategy.empirical_validation = validate_forecast_evidence(
+            strategy,
+            forecast,
+            minimum_observations=request.minimum_walk_forward_observations,
+            minimum_directional_accuracy=request.minimum_directional_accuracy,
+        )
+        provenance = {
+            'decision_status': strategy.decision_status,
+            'evidence_tags': strategy.evidence_tags,
+            'data_quality': data_quality,
+            'empirical_validation': strategy.empirical_validation,
+            'policy_version': 'swing-v1',
+        }
         
         import dataclasses
         strategy_dict = dataclasses.asdict(strategy)
 
         try:
             prediction_tracking = prediction_tracker.process_run(
-                ticker=request.ticker, entry_price=strategy.entry_price, predictions=strategy.predictions
+                ticker=request.ticker, entry_price=strategy.entry_price, predictions=strategy.predictions,
+                provenance=provenance,
             )
         except Exception as e:
             print(f"Warning: prediction tracking failed: {e}")
@@ -360,6 +397,7 @@ async def generate_strategy(request: StrategyRequest):
             "success": True,
             "strategy": engine._make_json_serializable(strategy_dict),
             "prediction_tracking": engine._make_json_serializable(prediction_tracking) if prediction_tracking else None,
+            "decision_support_only": True,
         }
 
     except HTTPException:
@@ -407,23 +445,52 @@ async def generate_strategy_v1(request: StrategyRequest):
             return envelope("strategy.generate", errors=[error_item(
                 "No market data found", "NO_DATA", "strategy", request.ticker
             )])
+        data_quality = validate_market_data(stock_data, request.max_data_age_days)
+        if not data_quality['valid']:
+            strategy = strategy_analyzer.create_suppressed_strategy(
+                request.ticker.strip().upper(), data_quality['reasons'], data_quality.get('data_as_of')
+            )
+            return envelope("strategy.generate", {"strategy": strategy, "prediction_tracking": None}, meta={
+                "ticker": request.ticker.upper(),
+                "decision_support_only": True,
+                "data_quality": data_quality,
+            })
         technical_indicators = {"_last_close": float(stock_data["Close"].iloc[-1])}
         seasonal = engine.seasonal_analyzer.analyze(stock_data)
         strategy = strategy_analyzer.generate_strategy(
             ticker=request.ticker.strip().upper(), data=stock_data, period=request.period,
             seasonal_analysis=seasonal, technical_indicators=technical_indicators,
             find_optimum=True,
+            evidence_threshold=request.evidence_threshold,
         )
+        forecast = forecast_prices(stock_data, request.ticker.strip().upper(), (5, 20, 60))
+        strategy.empirical_validation = validate_forecast_evidence(
+            strategy,
+            forecast,
+            minimum_observations=request.minimum_walk_forward_observations,
+            minimum_directional_accuracy=request.minimum_directional_accuracy,
+        )
+        provenance = {
+            'decision_status': strategy.decision_status,
+            'evidence_tags': strategy.evidence_tags,
+            'data_quality': data_quality,
+            'empirical_validation': strategy.empirical_validation,
+            'policy_version': 'swing-v1',
+        }
         try:
             prediction_tracking = prediction_tracker.process_run(
                 ticker=request.ticker.strip().upper(), entry_price=strategy.entry_price,
-                predictions=strategy.predictions,
+                predictions=strategy.predictions, provenance=provenance,
             )
         except Exception as e:
             print(f"Warning: prediction tracking failed: {e}")
             prediction_tracking = None
         return envelope("strategy.generate", {"strategy": strategy, "prediction_tracking": prediction_tracking},
-                       meta={"ticker": request.ticker.upper()})
+                       meta={
+                           "ticker": request.ticker.upper(),
+                           "decision_support_only": True,
+                           "evidence_threshold": request.evidence_threshold,
+                       })
     except Exception as exc:
         traceback.print_exc()
         return envelope("strategy.generate", errors=[error_item(

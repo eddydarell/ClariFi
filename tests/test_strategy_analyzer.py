@@ -98,6 +98,30 @@ class TestScoringBoundaries:
         result = analyzer.generate_strategy("FLAT", data)
         assert result.action == 'HOLD'
 
+    def test_actionable_signal_exposes_independent_evidence(self, analyzer):
+        data = make_price_data(100, 20, num_days=120, volatility=0.002)
+        result = analyzer.generate_strategy(
+            "BULL", data,
+            technical_indicators={'MACD': 1.0, 'MACD_Signal': 0.0, 'RSI_14': 55},
+        )
+
+        assert result.action == 'BUY'
+        assert result.decision_status == 'ACTIONABLE'
+        assert 'trend_bullish' in result.evidence_tags
+        assert result.evidence_score == len(result.evidence_tags)
+
+    def test_high_evidence_threshold_suppresses_actionable_signal(self, analyzer):
+        data = make_price_data(100, 20, num_days=120, volatility=0.002)
+        result = analyzer.generate_strategy(
+            "BULL", data,
+            technical_indicators={'MACD': 1.0, 'MACD_Signal': 0.0, 'RSI_14': 55},
+            evidence_threshold=10,
+        )
+
+        assert result.action == 'HOLD'
+        assert result.decision_status == 'SUPPRESSED'
+        assert result.gate_reasons == ['Insufficient independent evidence (3/10)']
+
 
 class TestPredictions:
     def test_prediction_keys_exist(self, analyzer):
@@ -123,14 +147,24 @@ class TestPredictions:
             assert isinstance(pred.confidence, str)
             assert isinstance(pred.reasoning, list)
 
-    def test_predictions_include_fixed_ten_percent_price_bounds(self, analyzer):
+    def test_predictions_include_volatility_adjusted_price_bounds(self, analyzer):
         data = make_price_data(100, 5, num_days=120)
         result = analyzer.generate_strategy("TEST", data)
 
         for key in ('short_term', 'mid_term', 'long_term'):
             prediction = result.predictions[key]
-            assert prediction.price_lower_bound == pytest.approx(prediction.predicted_price * 0.90)
-            assert prediction.price_upper_bound == pytest.approx(prediction.predicted_price * 1.10)
+            volatility_pct = result.key_metrics['volatility']['volatility_20d']
+            expected_margin = (
+                volatility_pct / np.sqrt(252) / 100
+                * np.sqrt(prediction.horizon_days)
+                * result.entry_price
+            )
+            assert prediction.price_lower_bound == pytest.approx(
+                max(0.01, prediction.predicted_price - expected_margin)
+            )
+            assert prediction.price_upper_bound == pytest.approx(
+                prediction.predicted_price + expected_margin
+            )
 
     def test_predicted_price_is_positive(self, analyzer):
         data = make_price_data(100, 5, num_days=120)

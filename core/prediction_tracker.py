@@ -54,7 +54,8 @@ class PredictionTracker:
         return resolved
 
     def record_predictions(self, ticker: str, entry_price: float, predictions: Dict[str, Any],
-                          run_id: Optional[str] = None) -> List[str]:
+                          run_id: Optional[str] = None,
+                          provenance: Optional[Dict[str, Any]] = None) -> List[str]:
         """Persist the tracked horizons (1_week/1_month/3_month/6_month/1_year) from a run."""
         normalized: Dict[str, Dict[str, Any]] = {}
         for horizon in TickerPrediction.HORIZONS:
@@ -64,13 +65,18 @@ class PredictionTracker:
             normalized[horizon] = asdict(pred) if is_dataclass(pred) else pred
         if not normalized:
             return []
-        return self.model.save_predictions(ticker, entry_price, normalized, run_id=run_id)
+        return self.model.save_predictions(
+            ticker, entry_price, normalized, run_id=run_id, provenance=provenance
+        )
 
     def process_run(self, ticker: str, entry_price: float, predictions: Dict[str, Any],
-                    run_id: Optional[str] = None) -> Dict[str, Any]:
+                    run_id: Optional[str] = None,
+                    provenance: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Resolve due predictions, record this run's new predictions, return a summary."""
         resolved = self.resolve_due_predictions(ticker)
-        new_ids = self.record_predictions(ticker, entry_price, predictions, run_id=run_id)
+        new_ids = self.record_predictions(
+            ticker, entry_price, predictions, run_id=run_id, provenance=provenance
+        )
         confidence = self.model.get_confidence_summary(ticker)
         return {
             "resolved": resolved,
