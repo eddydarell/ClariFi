@@ -293,6 +293,7 @@ class DatabaseManager:
                     evidence_tags TEXT,
                     data_quality TEXT,
                     empirical_validation TEXT,
+                    trade_plan_validation TEXT,
                     policy_version TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     resolved INTEGER NOT NULL DEFAULT 0,
@@ -309,6 +310,7 @@ class DatabaseManager:
                 ('evidence_tags', 'TEXT'),
                 ('data_quality', 'TEXT'),
                 ('empirical_validation', 'TEXT'),
+                ('trade_plan_validation', 'TEXT'),
                 ('policy_version', 'TEXT'),
             ):
                 try:
@@ -1142,8 +1144,9 @@ class TickerPrediction:
                     INSERT INTO ticker_predictions
                     (id, ticker, horizon, run_id, entry_price, predicted_price,
                      predicted_change_pct, predicted_trend, confidence, target_date,
-                     decision_status, evidence_tags, data_quality, empirical_validation, policy_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     decision_status, evidence_tags, data_quality, empirical_validation,
+                     trade_plan_validation, policy_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     prediction_id, ticker, horizon, run_id, entry_price,
                     pred["predicted_price"], predicted_change_pct,
@@ -1153,6 +1156,7 @@ class TickerPrediction:
                     json.dumps(provenance.get('evidence_tags', [])),
                     json.dumps(provenance.get('data_quality', {})),
                     json.dumps(provenance.get('empirical_validation', {})),
+                    json.dumps(provenance.get('trade_plan_validation', {})),
                     provenance.get('policy_version'),
                 ))
                 ids.append(prediction_id)

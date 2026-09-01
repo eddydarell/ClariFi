@@ -44,6 +44,23 @@ class PricePrediction:
 
 
 @dataclass
+class TradePlan:
+    """Bounded entry and exit conditions for a single swing-trade thesis."""
+    action: str
+    entry_price: float
+    entry_condition: str
+    stop_price: float
+    target_price: float
+    time_stop_days: int
+    risk_per_share: float
+    reward_per_share: float
+    risk_reward_ratio: float
+    estimated_round_trip_cost_pct: float
+    valid: bool
+    reasons: List[str]
+
+
+@dataclass
 class StrategyRecommendation:
     """Time-sensitive investment strategy recommendation."""
     ticker: str
@@ -64,6 +81,8 @@ class StrategyRecommendation:
     decision_status: str = 'HOLD'
     gate_reasons: List[str] = field(default_factory=list)
     empirical_validation: Dict[str, any] = field(default_factory=dict)
+    trade_plan: Optional[TradePlan] = None
+    trade_plan_validation: Dict[str, any] = field(default_factory=dict)
 
 
 class StrategyAnalyzer:
@@ -630,6 +649,9 @@ class StrategyAnalyzer:
             trend=trend,
             momentum=momentum,
         )
+        trade_plan = self._build_trade_plan(
+            action, current_price, timeframe, predictions, volatility['volatility_20d']
+        )
 
         return StrategyRecommendation(
             ticker=ticker,
@@ -653,6 +675,65 @@ class StrategyAnalyzer:
             evidence_score=len(evidence_tags),
             decision_status=decision_status,
             gate_reasons=gate_reasons,
+            trade_plan=trade_plan,
+        )
+
+    def _build_trade_plan(
+        self,
+        action: str,
+        entry_price: float,
+        timeframe: str,
+        predictions: Dict[str, PricePrediction],
+        annualized_volatility_pct: float,
+    ) -> Optional[TradePlan]:
+        """Build a forecast-anchored trade plan; HOLD recommendations need no plan."""
+        if action not in {'BUY', 'SELL'}:
+            return None
+
+        timeframe_days = {
+            '2 days': 2, '5 days': 5, '1 week': 7, '2 weeks': 14,
+            '1 month': 30, '2 months': 60,
+        }.get(timeframe, 5)
+        prediction_key = 'short_term' if timeframe_days <= 7 else 'mid_term' if timeframe_days <= 30 else 'long_term'
+        prediction = predictions[prediction_key]
+        daily_volatility_pct = max(annualized_volatility_pct / np.sqrt(252), 1.0)
+        stop_distance_pct = max(daily_volatility_pct * 2, 2.0)
+        round_trip_cost_pct = 0.20
+
+        if action == 'BUY':
+            stop_price = entry_price * (1 - stop_distance_pct / 100)
+            target_price = prediction.predicted_price
+            risk_per_share = entry_price - stop_price
+            reward_per_share = target_price - entry_price
+            entry_condition = 'Enter only at or below the stated entry price.'
+        else:
+            stop_price = entry_price * (1 + stop_distance_pct / 100)
+            target_price = prediction.predicted_price
+            risk_per_share = stop_price - entry_price
+            reward_per_share = entry_price - target_price
+            entry_condition = 'Exit an existing long position at or above the stated entry price.'
+
+        net_reward_per_share = reward_per_share - entry_price * round_trip_cost_pct / 100
+        risk_reward_ratio = net_reward_per_share / risk_per_share if risk_per_share > 0 else 0.0
+        reasons: List[str] = []
+        if reward_per_share <= 0:
+            reasons.append('Forecast target does not support the proposed trade direction')
+        if risk_reward_ratio < 1.5:
+            reasons.append('Risk/reward after estimated costs is below 1.5')
+
+        return TradePlan(
+            action=action,
+            entry_price=entry_price,
+            entry_condition=entry_condition,
+            stop_price=stop_price,
+            target_price=target_price,
+            time_stop_days=timeframe_days,
+            risk_per_share=risk_per_share,
+            reward_per_share=net_reward_per_share,
+            risk_reward_ratio=risk_reward_ratio,
+            estimated_round_trip_cost_pct=round_trip_cost_pct,
+            valid=not reasons,
+            reasons=reasons,
         )
 
     def _collect_evidence_tags(self, action: str, signals: Dict[str, any]) -> List[str]:

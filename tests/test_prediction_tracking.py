@@ -70,13 +70,15 @@ def test_tracker_persists_recommendation_provenance(tmp_path):
             'evidence_tags': ['trend_bullish', 'volatility_acceptable'],
             'data_quality': {'status': 'PASSED', 'valid': True},
             'empirical_validation': {'status': 'FAILED', 'actionable': False},
+            'trade_plan_validation': {'status': 'NOT_APPLICABLE', 'actionable': False},
             'policy_version': 'swing-v1',
         },
     )
 
     with db_manager.get_connection() as conn:
         row = conn.execute('''
-            SELECT decision_status, evidence_tags, data_quality, empirical_validation, policy_version
+                 SELECT decision_status, evidence_tags, data_quality, empirical_validation,
+                     trade_plan_validation, policy_version
             FROM ticker_predictions WHERE ticker = ? LIMIT 1
         ''', ('TEST',)).fetchone()
 
@@ -85,3 +87,4 @@ def test_tracker_persists_recommendation_provenance(tmp_path):
     assert row['evidence_tags'] == '["trend_bullish", "volatility_acceptable"]'
     assert '"status": "PASSED"' in row['data_quality']
     assert '"status": "FAILED"' in row['empirical_validation']
+    assert '"status": "NOT_APPLICABLE"' in row['trade_plan_validation']

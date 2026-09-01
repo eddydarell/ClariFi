@@ -122,6 +122,21 @@ class TestScoringBoundaries:
         assert result.decision_status == 'SUPPRESSED'
         assert result.gate_reasons == ['Insufficient independent evidence (3/10)']
 
+    def test_actionable_signal_includes_bounded_trade_plan(self, analyzer):
+        data = make_price_data(100, 20, num_days=120, volatility=0.002)
+        result = analyzer.generate_strategy(
+            "BULL", data,
+            technical_indicators={'MACD': 1.0, 'MACD_Signal': 0.0, 'RSI_14': 55},
+        )
+
+        plan = result.trade_plan
+        assert plan is not None
+        assert plan.action == 'BUY'
+        assert plan.stop_price < plan.entry_price < plan.target_price
+        assert plan.time_stop_days >= 1
+        assert plan.risk_per_share > 0
+        assert plan.risk_reward_ratio > 0
+
 
 class TestPredictions:
     def test_prediction_keys_exist(self, analyzer):

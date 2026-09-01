@@ -28,7 +28,11 @@ from core.strategy_analyzer import StrategyAnalyzer
 from core.live_monitor import LiveStockMonitor
 from core.forecast_engine import forecast_prices
 from core.prediction_tracker import PredictionTracker
-from core.recommendation_validation import validate_forecast_evidence, validate_market_data
+from core.recommendation_validation import (
+    validate_forecast_evidence,
+    validate_market_data,
+    validate_trade_plan,
+)
 from core.result_schema import envelope, error_item, to_jsonable
 
 # Initialize FastAPI app
@@ -373,11 +377,13 @@ async def generate_strategy(request: StrategyRequest):
             minimum_observations=request.minimum_walk_forward_observations,
             minimum_directional_accuracy=request.minimum_directional_accuracy,
         )
+        strategy.trade_plan_validation = validate_trade_plan(strategy)
         provenance = {
             'decision_status': strategy.decision_status,
             'evidence_tags': strategy.evidence_tags,
             'data_quality': data_quality,
             'empirical_validation': strategy.empirical_validation,
+            'trade_plan_validation': strategy.trade_plan_validation,
             'policy_version': 'swing-v1',
         }
         
@@ -470,11 +476,13 @@ async def generate_strategy_v1(request: StrategyRequest):
             minimum_observations=request.minimum_walk_forward_observations,
             minimum_directional_accuracy=request.minimum_directional_accuracy,
         )
+        strategy.trade_plan_validation = validate_trade_plan(strategy)
         provenance = {
             'decision_status': strategy.decision_status,
             'evidence_tags': strategy.evidence_tags,
             'data_quality': data_quality,
             'empirical_validation': strategy.empirical_validation,
+            'trade_plan_validation': strategy.trade_plan_validation,
             'policy_version': 'swing-v1',
         }
         try:

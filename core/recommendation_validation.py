@@ -118,6 +118,32 @@ def validate_forecast_evidence(
     return _suppress(strategy, horizon, validation["reasons"], metrics, validation)
 
 
+def validate_trade_plan(strategy: Any) -> Dict[str, Any]:
+    """Suppress actionable strategies without a valid bounded trade plan."""
+    if strategy.action not in {"BUY", "SELL"}:
+        return {"status": "NOT_APPLICABLE", "actionable": False, "reasons": []}
+    plan = strategy.trade_plan
+    if plan is None:
+        return _suppress_trade_plan(strategy, ["No trade plan is available"])
+    if plan.valid:
+        return {
+            "status": "PASSED",
+            "actionable": True,
+            "risk_reward_ratio": plan.risk_reward_ratio,
+            "reasons": [],
+        }
+    return _suppress_trade_plan(strategy, plan.reasons)
+
+
+def _suppress_trade_plan(strategy: Any, reasons: list[str]) -> Dict[str, Any]:
+    strategy.action = "HOLD"
+    strategy.decision_status = "SUPPRESSED"
+    strategy.optimal_moment = None
+    strategy.gate_reasons.extend(reasons)
+    strategy.rationale.extend(reasons)
+    return {"status": "FAILED", "actionable": False, "reasons": reasons}
+
+
 def _suppress(
     strategy: Any,
     horizon: int,

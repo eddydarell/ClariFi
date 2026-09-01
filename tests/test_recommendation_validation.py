@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from core.recommendation_validation import validate_forecast_evidence, validate_market_data
+from core.recommendation_validation import (
+    validate_forecast_evidence,
+    validate_market_data,
+    validate_trade_plan,
+)
 
 
 def make_strategy(action="BUY", timeframe="1 week"):
@@ -99,3 +103,14 @@ def test_market_data_validation_rejects_stale_or_duplicate_bars():
 
     assert validation["valid"] is False
     assert "Market data contains duplicate timestamps" in validation["reasons"]
+
+
+def test_invalid_trade_plan_suppresses_actionable_strategy():
+    strategy = make_strategy()
+    strategy.trade_plan = SimpleNamespace(valid=False, reasons=['Risk/reward after estimated costs is below 1.5'])
+
+    validation = validate_trade_plan(strategy)
+
+    assert validation['status'] == 'FAILED'
+    assert strategy.action == 'HOLD'
+    assert strategy.decision_status == 'SUPPRESSED'
