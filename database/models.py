@@ -318,6 +318,28 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass
 
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS shadow_trades (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    stop_price REAL NOT NULL,
+                    target_price REAL NOT NULL,
+                    time_stop_days INTEGER NOT NULL,
+                    estimated_round_trip_cost_pct REAL NOT NULL,
+                    policy_version TEXT,
+                    provenance TEXT,
+                    status TEXT NOT NULL DEFAULT 'OPEN',
+                    exit_date TEXT,
+                    exit_price REAL,
+                    exit_reason TEXT,
+                    realized_return_pct REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    closed_at TIMESTAMP
+                )
+            ''')
+
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_ticker ON analysis_results(ticker)')
@@ -329,6 +351,7 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_ticker ON portfolio_transactions(ticker)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_ticker ON ticker_predictions(ticker)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_due ON ticker_predictions(ticker, resolved, target_date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_shadow_trades_open ON shadow_trades(ticker, status, entry_date)')
 
             conn.commit()
 

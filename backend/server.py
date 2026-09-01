@@ -28,6 +28,7 @@ from core.strategy_analyzer import StrategyAnalyzer
 from core.live_monitor import LiveStockMonitor
 from core.forecast_engine import forecast_prices
 from core.prediction_tracker import PredictionTracker
+from core.shadow_trade_tracker import ShadowTradeTracker
 from core.recommendation_validation import (
     validate_forecast_evidence,
     validate_market_data,
@@ -57,6 +58,7 @@ screener = StockScreener()
 strategy_analyzer = StrategyAnalyzer()
 live_monitor = LiveStockMonitor()
 prediction_tracker = PredictionTracker(engine.db_manager)
+shadow_trade_tracker = ShadowTradeTracker(engine.db_manager)
 
 
 # Pydantic models for request/response
@@ -399,10 +401,19 @@ async def generate_strategy(request: StrategyRequest):
             print(f"Warning: prediction tracking failed: {e}")
             prediction_tracking = None
 
+        try:
+            shadow_trade_tracking = shadow_trade_tracker.process_strategy(
+                request.ticker, strategy, data_quality['data_as_of'], provenance
+            )
+        except Exception as e:
+            print(f"Warning: shadow trade tracking failed: {e}")
+            shadow_trade_tracking = None
+
         return {
             "success": True,
             "strategy": engine._make_json_serializable(strategy_dict),
             "prediction_tracking": engine._make_json_serializable(prediction_tracking) if prediction_tracking else None,
+            "shadow_trade_tracking": engine._make_json_serializable(shadow_trade_tracking) if shadow_trade_tracking else None,
             "decision_support_only": True,
         }
 
@@ -493,7 +504,18 @@ async def generate_strategy_v1(request: StrategyRequest):
         except Exception as e:
             print(f"Warning: prediction tracking failed: {e}")
             prediction_tracking = None
-        return envelope("strategy.generate", {"strategy": strategy, "prediction_tracking": prediction_tracking},
+        try:
+            shadow_trade_tracking = shadow_trade_tracker.process_strategy(
+                request.ticker.strip().upper(), strategy, data_quality['data_as_of'], provenance
+            )
+        except Exception as e:
+            print(f"Warning: shadow trade tracking failed: {e}")
+            shadow_trade_tracking = None
+        return envelope("strategy.generate", {
+            "strategy": strategy,
+            "prediction_tracking": prediction_tracking,
+            "shadow_trade_tracking": shadow_trade_tracking,
+        },
                        meta={
                            "ticker": request.ticker.upper(),
                            "decision_support_only": True,
