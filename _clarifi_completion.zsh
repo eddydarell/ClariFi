@@ -47,6 +47,7 @@ _clarifi() {
                         '--no-seasonal[Skip seasonal analysis]' \
                         '--include-deep[Include deep backtesting analysis]' \
                         '--deep-chunk-months[Chunk size in months]:months:' \
+                        '--ai[Output condensed signal data (JSON) for an AI trading bot]' \
                         '--help[Show help]' \
                         '-h[Show help]'
                     ;;

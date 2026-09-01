@@ -331,6 +331,86 @@ class AdvancedStockAnalysis:
         except:
             return str(obj)
 
+    def build_ai_signals(self, result):
+        """Condense a comprehensive_analysis() JSON result into the minimal fields
+        an automated trading bot needs to make a BUY/SELL/HOLD call per ticker."""
+        analyses = result.get("analyses", {}) or {}
+        strategies = analyses.get("strategy", {}) or {}
+        technical_indicators = (analyses.get("patterns", {}) or {}).get("technical_indicators", {}) or {}
+        options_results = analyses.get("options", {}) or {}
+        seasonal_results = analyses.get("seasonal", {}) or {}
+        deep_results = analyses.get("deep", {}) or {}
+
+        signals = {}
+        for ticker in result.get("tickers", []):
+            strategy = strategies.get(ticker)
+            if not isinstance(strategy, dict) or strategy.get("error"):
+                signals[ticker] = {"error": strategy.get("error") if isinstance(strategy, dict) else "No strategy generated"}
+                continue
+
+            predictions = {}
+            for horizon, prediction in (strategy.get("predictions") or {}).items():
+                if not prediction:
+                    continue
+                predictions[horizon] = {
+                    "predicted_price": prediction.get("predicted_price"),
+                    "predicted_change_pct": prediction.get("predicted_change_pct"),
+                    "price_lower_bound": prediction.get("price_lower_bound"),
+                    "price_upper_bound": prediction.get("price_upper_bound"),
+                    "confidence": prediction.get("confidence"),
+                }
+
+            technical = technical_indicators.get(ticker) or {}
+            options = options_results.get(ticker) or {}
+            risk_ratios = options.get("risk_ratios", {}) if isinstance(options, dict) else {}
+            advanced_var = options.get("advanced_var_measures", {}) if isinstance(options, dict) else {}
+            seasonal = seasonal_results.get(ticker) if isinstance(seasonal_results, dict) else None
+            deep = deep_results.get(ticker) if isinstance(deep_results, dict) else None
+
+            signals[ticker] = {
+                "action": strategy.get("action"),
+                "decision_status": strategy.get("decision_status"),
+                "confidence": strategy.get("confidence"),
+                "risk_level": strategy.get("risk_level"),
+                "entry_price": strategy.get("entry_price"),
+                "expected_return_pct": strategy.get("expected_return_pct"),
+                "timeframe": strategy.get("timeframe"),
+                "evidence_score": strategy.get("evidence_score"),
+                "evidence_tags": strategy.get("evidence_tags"),
+                "rationale": strategy.get("rationale"),
+                "gate_reasons": strategy.get("gate_reasons"),
+                "predictions": predictions,
+                "trade_plan": strategy.get("trade_plan"),
+                "technical_indicators": {
+                    "RSI_14": technical.get("RSI_14"),
+                    "MACD": technical.get("MACD"),
+                    "MACD_Signal": technical.get("MACD_Signal"),
+                    "ADX": technical.get("ADX"),
+                    "market_regime": (technical.get("market_regime") or {}).get("regime"),
+                },
+                "risk_metrics": {
+                    "volatility": options.get("current_volatility") if isinstance(options, dict) else None,
+                    "var_95_pct": advanced_var.get("var_95_pct"),
+                    "sharpe_ratio": risk_ratios.get("sharpe_ratio"),
+                },
+                "seasonal": {
+                    "bias_score": (seasonal or {}).get("bias_score"),
+                    "recommendation": (seasonal or {}).get("recommendation"),
+                } if seasonal else None,
+                "deep_backtest": {
+                    "precision_coefficient": ((deep or {}).get("summary") or {}).get("coefficient_of_precision"),
+                    "chunks_evaluated": ((deep or {}).get("summary") or {}).get("chunks_evaluated"),
+                } if deep else None,
+            }
+
+        return {
+            "command": "analyze",
+            "mode": "ai",
+            "period": result.get("period"),
+            "signals": signals,
+            "errors": result.get("errors", []),
+        }
+
     def comprehensive_analysis(self, tickers, period="1y", download=True,
                              include_patterns=True, include_events=True,
                              include_advanced_viz=True, include_options=True,
@@ -2634,6 +2714,7 @@ def main():
     analyze_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
     analyze_parser.add_argument('--include-ml', action='store_true', help='Include machine learning analysis')
     analyze_parser.add_argument('--summary-only', action='store_true', help='Print only summary recommendations')
+    analyze_parser.add_argument('--ai', action='store_true', help='Output only condensed signal data (JSON) for feeding into an automated trading bot')
 
     # AI analysis (LLM powered)
     ai_parser = subparsers.add_parser(
@@ -3183,22 +3264,28 @@ def main():
                     print(json.dumps(result, indent=2))
             else:
                 # Regular ticker analysis using legacy system
+                ai_mode = getattr(args, 'ai', False)
+                json_mode = getattr(args, 'json', False) or ai_mode
                 result = analysis.comprehensive_analysis(
                     args.tickers,
                     args.period,
                     download=not args.no_download,
                     include_patterns=not args.no_patterns,
                     include_events=not args.no_events,
-                    include_advanced_viz=not args.no_advanced_viz,
+                    # Charts add no value for an AI/bot consumer; skip them in --ai mode
+                    include_advanced_viz=(not args.no_advanced_viz) and not ai_mode,
                     include_options=not args.no_options,
                     include_investment_advice=not args.no_investment_advice,
                     include_seasonal=not args.no_seasonal,
                     include_ml=getattr(args, 'include_ml', False),
                     include_deep=args.include_deep,
                     deep_chunk_months=args.deep_chunk_months,
-                    json_output=getattr(args, 'json', False)
+                    json_output=json_mode
                 )
-                if getattr(args, 'json', False):
+                if ai_mode:
+                    import json
+                    print(json.dumps(analysis.build_ai_signals(result), indent=2))
+                elif json_mode:
                     import json
                     print(json.dumps(result, indent=2))
 

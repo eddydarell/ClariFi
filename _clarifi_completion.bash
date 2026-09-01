@@ -52,7 +52,7 @@ _clarifi_completion() {
                         COMPREPLY=($(compgen -W "$quick_options" -- "$cur"))
                         ;;
                     analyze)
-                        local analyze_options="--period -p --no-download --no-patterns --no-events --no-advanced-viz --no-options --no-investment-advice --no-seasonal --include-deep --deep-chunk-months --help -h"
+                        local analyze_options="--period -p --no-download --no-patterns --no-events --no-advanced-viz --no-options --no-investment-advice --no-seasonal --include-deep --deep-chunk-months --ai --help -h"
                         COMPREPLY=($(compgen -W "$analyze_options" -- "$cur"))
                         ;;
                     seasonal)
