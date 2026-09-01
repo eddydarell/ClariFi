@@ -165,9 +165,14 @@ def _run_ingest(ingest_args: list[str]) -> dict[str, Any]:
 
 def _delegate_to_legacy(command_args: list[str], pretty: bool) -> tuple[int, str, str]:
     cmd = [sys.executable, str(CORE_MAIN)]
-    if not pretty and "--json" not in command_args:
+    forwarded = list(command_args)
+
+    if "--json" in forwarded:
+        forwarded.remove("--json")
+    if not pretty:
         cmd.append("--json")
-    cmd.extend(command_args)
+
+    cmd.extend(forwarded)
     completed = subprocess.run(cmd, capture_output=True, text=True)
     return completed.returncode, completed.stdout, completed.stderr
 

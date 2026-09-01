@@ -14,6 +14,7 @@ import sys
 import calendar
 import io
 import contextlib
+import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -61,6 +62,7 @@ try:
     from alphavantage_analyzer import AlphaVantageAnalyzer
     from strategy_analyzer import StrategyAnalyzer
     from prediction_tracker import PredictionTracker
+    from ticker_suggestion_engine import TickerSuggestionEngine
     # Import ML analyzer with fallback
     try:
         from ml_analyzer import MLAnalyzer
@@ -2689,6 +2691,15 @@ def main():
     strategy_parser.add_argument('--deep-chunk-months', type=int, default=3, help='Chunk size in months for deep analysis (default: 3)')
     strategy_parser.add_argument('--optimum', action='store_true', help='Find optimal buy/sell moment based on all analysis data')
 
+    suggest_parser = subparsers.add_parser(
+        'suggest',
+        help='📈 Suggest short-term ticker candidates using free market signals',
+        description='Scan a ticker universe and rank candidates using momentum, volume checks, and analyst bias.',
+    )
+    suggest_parser.add_argument('tickers', nargs='*', help='Optional explicit ticker list; otherwise uses the built-in universe')
+    suggest_parser.add_argument('--limit', type=int, default=10, help='Maximum number of suggestions to show (default: 10)')
+    suggest_parser.add_argument('--min-score', type=float, default=55.0, help='Minimum composite score threshold (default: 55.0)')
+
     # ML analysis
     ml_parser = subparsers.add_parser('ml_analyze', help='Machine Learning analysis with Random Forest, XGBoost, LightGBM')
     ml_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
@@ -2953,6 +2964,16 @@ def main():
             except ImportError as ie:
                 raise ie
         engine = None  # Lazy init
+    except sqlite3.DatabaseError as e:
+        db_path = os.environ.get("CLARIFI_DB_PATH", "clarifi.db")
+        print(f"❌ Error initializing analysis tools: {e}")
+        print(f"💡 SQLite database '{db_path}' is corrupted. Run these commands from the project root:")
+        print(f"   cp -p '{db_path}' '{db_path}.corrupt.$(date +%Y%m%d-%H%M%S)'")
+        print(f"   sqlite3 '{db_path}' '.recover' | sqlite3 '{db_path}.recovered'")
+        print(f"   sqlite3 '{db_path}.recovered' 'PRAGMA integrity_check;'")
+        print(f"   mv '{db_path}' '{db_path}.broken' && mv '{db_path}.recovered' '{db_path}'")
+        print("   Re-run this command after the recovered database reports 'ok'.")
+        return
     except Exception as e:
         print(f"❌ Error initializing analysis tools: {e}")
         print("💡 Make sure all dependencies are installed: pip install -r requirements.txt")
@@ -3623,6 +3644,41 @@ def main():
             print("=" * 70)
             print("⚠️  DISCLAIMER: This is not financial advice. Always do your own research.")
             print("=" * 70)
+
+        elif args.command == 'suggest':
+            engine = TickerSuggestionEngine(min_score=getattr(args, 'min_score', 55.0))
+            universe = [ticker.upper() for ticker in args.tickers] if args.tickers else None
+            results = engine.discover_suggestions(universe=universe, limit=args.limit)
+            payload = {
+                "command": "suggest",
+                "limit": args.limit,
+                "min_score": args.min_score,
+                "results": [
+                    {
+                        "symbol": item.symbol,
+                        "score": round(item.score, 2),
+                        "expected_7d_return": round(item.expected_7d_return, 2),
+                        "momentum": round(item.momentum, 2),
+                        "volume_signal": round(item.volume_signal, 2),
+                        "analyst_bias": round(item.analyst_bias, 2),
+                        "risk_flag": item.risk_flag,
+                        "reason": item.reason,
+                    }
+                    for item in results
+                ],
+            }
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps(payload, indent=2))
+                return
+
+            if not results:
+                print(f"No ticker suggestions met the {args.min_score} score threshold.")
+                return
+
+            print(f"\nTop suggestions (min score {args.min_score}):")
+            for item in results:
+                print(f"  {item.symbol}: score={item.score:.2f}, expected_7d_return={item.expected_7d_return:.2f}%, momentum={item.momentum:.2f}%, volume_signal={item.volume_signal:.2f}%, analyst_bias={item.analyst_bias:.2f}, risk={item.risk_flag} | {item.reason}")
 
         elif args.command == 'ml_analyze':
             # Check if ML dependencies are available
