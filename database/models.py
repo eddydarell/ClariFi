@@ -6,7 +6,7 @@ Database models for ClariFi application
 import sqlite3
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 
@@ -318,6 +318,24 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass
 
+            # Suggestion cache table - short-term ticker suggestions are cached for a
+            # rolling TTL (default 24h) so the same ticker isn't re-suggested until it expires.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS suggestion_cache (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    expected_7d_return REAL,
+                    momentum REAL,
+                    volume_signal REAL,
+                    analyst_bias REAL,
+                    risk_flag TEXT,
+                    reason TEXT,
+                    cached_at TIMESTAMP NOT NULL,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            ''')
+
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS shadow_trades (
                     id TEXT PRIMARY KEY,
@@ -352,6 +370,8 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_ticker ON ticker_predictions(ticker)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_due ON ticker_predictions(ticker, resolved, target_date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_shadow_trades_open ON shadow_trades(ticker, status, entry_date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_suggestion_cache_ticker ON suggestion_cache(ticker)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_suggestion_cache_expires ON suggestion_cache(expires_at)')
 
             conn.commit()
 
@@ -1288,3 +1308,78 @@ class TickerPrediction:
             "pending_count": pending,
             "by_horizon": by_horizon,
         }
+
+
+class SuggestionCache:
+    """Caches `suggest` command results for a rolling TTL (default 24h).
+
+    Once a ticker is suggested it is cached and excluded from being suggested
+    again until its cache entry expires, at which point it becomes eligible
+    again. Active cache entries are surfaced back to callers so they can be
+    appended to subsequent `suggest` results with a freshness indicator.
+    """
+
+    DEFAULT_TTL_HOURS = 24.0
+    TIMESTAMP_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+
+    def purge_expired(self, as_of: Optional[datetime] = None) -> int:
+        """Delete cache entries whose TTL has elapsed, freeing their tickers for re-suggestion."""
+        as_of = as_of or datetime.utcnow()
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'DELETE FROM suggestion_cache WHERE expires_at <= ?',
+                (as_of.strftime(self.TIMESTAMP_FORMAT),)
+            )
+            deleted = cursor.rowcount
+            conn.commit()
+        return deleted
+
+    def get_active(self, as_of: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Fetch all cache entries that have not yet expired."""
+        as_of = as_of or datetime.utcnow()
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM suggestion_cache
+                WHERE expires_at > ?
+                ORDER BY cached_at DESC
+            ''', (as_of.strftime(self.TIMESTAMP_FORMAT),))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_active_tickers(self, as_of: Optional[datetime] = None) -> set:
+        """Set of tickers currently within their 24h suggestion cooldown."""
+        return {row['ticker'] for row in self.get_active(as_of=as_of)}
+
+    def add_suggestions(self, suggestions: List[Any], ttl_hours: float = DEFAULT_TTL_HOURS) -> int:
+        """Cache newly-suggested tickers, skipping any already actively cached."""
+        if not suggestions:
+            return 0
+        now = datetime.utcnow()
+        expires_at = now + timedelta(hours=ttl_hours)
+        active_tickers = self.get_active_tickers(as_of=now)
+        inserted = 0
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+            for item in suggestions:
+                ticker = item.symbol.upper()
+                if ticker in active_tickers:
+                    continue
+                cursor.execute('''
+                    INSERT INTO suggestion_cache
+                    (id, ticker, score, expected_7d_return, momentum, volume_signal,
+                     analyst_bias, risk_flag, reason, cached_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    str(uuid.uuid4()), ticker, item.score, item.expected_7d_return,
+                    item.momentum, item.volume_signal, item.analyst_bias,
+                    item.risk_flag, item.reason,
+                    now.strftime(self.TIMESTAMP_FORMAT), expires_at.strftime(self.TIMESTAMP_FORMAT),
+                ))
+                active_tickers.add(ticker)
+                inserted += 1
+            conn.commit()
+        return inserted

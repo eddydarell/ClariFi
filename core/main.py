@@ -3733,39 +3733,91 @@ def main():
             print("=" * 70)
 
         elif args.command == 'suggest':
+            from database.models import DatabaseManager, SuggestionCache
+
+            db_manager = DatabaseManager(os.environ.get("CLARIFI_DB_PATH", "clarifi.db"))
+            suggestion_cache = SuggestionCache(db_manager)
+            suggestion_cache.purge_expired()  # frees tickers whose 24h cooldown has elapsed
+
+            now = datetime.utcnow()
+            active_cache = suggestion_cache.get_active(as_of=now)
+            cached_tickers = {row['ticker'] for row in active_cache}
+
             engine = TickerSuggestionEngine(min_score=getattr(args, 'min_score', 55.0))
-            universe = [ticker.upper() for ticker in args.tickers] if args.tickers else None
-            results = engine.discover_suggestions(universe=universe, limit=args.limit)
+            requested_universe = [ticker.upper() for ticker in args.tickers] if args.tickers else engine.DEFAULT_UNIVERSE
+            universe = [ticker for ticker in requested_universe if ticker not in cached_tickers]
+
+            results = engine.discover_suggestions(universe=universe, limit=args.limit) if universe else []
+            suggestion_cache.add_suggestions(results)
+
+            def _freshness(cached_at_str, expires_at_str, as_of):
+                cached_at = datetime.strptime(cached_at_str, '%Y-%m-%d %H:%M:%S')
+                expires_at = datetime.strptime(expires_at_str, '%Y-%m-%d %H:%M:%S')
+                age = as_of - cached_at
+                remaining = expires_at - as_of
+                age_hours = age.total_seconds() / 3600
+                remaining_hours = max(remaining.total_seconds() / 3600, 0)
+                return age_hours, remaining_hours
+
+            cached_entries = []
+            for row in active_cache:
+                age_hours, remaining_hours = _freshness(row['cached_at'], row['expires_at'], now)
+                cached_entries.append({
+                    "symbol": row['ticker'],
+                    "score": round(row['score'], 2),
+                    "expected_7d_return": round(row['expected_7d_return'], 2) if row['expected_7d_return'] is not None else None,
+                    "momentum": round(row['momentum'], 2) if row['momentum'] is not None else None,
+                    "volume_signal": round(row['volume_signal'], 2) if row['volume_signal'] is not None else None,
+                    "analyst_bias": round(row['analyst_bias'], 2) if row['analyst_bias'] is not None else None,
+                    "risk_flag": row['risk_flag'],
+                    "reason": row['reason'],
+                    "cached": True,
+                    "cached_at": row['cached_at'],
+                    "expires_at": row['expires_at'],
+                    "cached_age_hours": round(age_hours, 2),
+                    "cache_expires_in_hours": round(remaining_hours, 2),
+                })
+
+            fresh_entries = [
+                {
+                    "symbol": item.symbol,
+                    "score": round(item.score, 2),
+                    "expected_7d_return": round(item.expected_7d_return, 2),
+                    "momentum": round(item.momentum, 2),
+                    "volume_signal": round(item.volume_signal, 2),
+                    "analyst_bias": round(item.analyst_bias, 2),
+                    "risk_flag": item.risk_flag,
+                    "reason": item.reason,
+                    "cached": False,
+                }
+                for item in results
+            ]
+
             payload = {
                 "command": "suggest",
                 "limit": args.limit,
                 "min_score": args.min_score,
-                "results": [
-                    {
-                        "symbol": item.symbol,
-                        "score": round(item.score, 2),
-                        "expected_7d_return": round(item.expected_7d_return, 2),
-                        "momentum": round(item.momentum, 2),
-                        "volume_signal": round(item.volume_signal, 2),
-                        "analyst_bias": round(item.analyst_bias, 2),
-                        "risk_flag": item.risk_flag,
-                        "reason": item.reason,
-                    }
-                    for item in results
-                ],
+                "results": fresh_entries + cached_entries,
+                "cached_count": len(cached_entries),
             }
             if getattr(args, 'json', False):
                 import json
                 print(json.dumps(payload, indent=2))
                 return
 
-            if not results:
+            if not fresh_entries and not cached_entries:
                 print(f"No ticker suggestions met the {args.min_score} score threshold.")
                 return
 
-            print(f"\nTop suggestions (min score {args.min_score}):")
-            for item in results:
-                print(f"  {item.symbol}: score={item.score:.2f}, expected_7d_return={item.expected_7d_return:.2f}%, momentum={item.momentum:.2f}%, volume_signal={item.volume_signal:.2f}%, analyst_bias={item.analyst_bias:.2f}, risk={item.risk_flag} | {item.reason}")
+            if fresh_entries:
+                print(f"\nTop suggestions (min score {args.min_score}):")
+                for item in fresh_entries:
+                    print(f"  {item['symbol']}: score={item['score']:.2f}, expected_7d_return={item['expected_7d_return']:.2f}%, momentum={item['momentum']:.2f}%, volume_signal={item['volume_signal']:.2f}%, analyst_bias={item['analyst_bias']:.2f}, risk={item['risk_flag']} | {item['reason']}")
+
+            if cached_entries:
+                print(f"\nCached suggestions (still within 24h cooldown):")
+                for item in cached_entries:
+                    print(f"  [CACHED, {item['cached_age_hours']:.1f}h ago, expires in {item['cache_expires_in_hours']:.1f}h] {item['symbol']}: score={item['score']:.2f} | {item['reason']}")
 
         elif args.command == 'ml_analyze':
             # Check if ML dependencies are available
@@ -4399,7 +4451,6 @@ def main():
                 engine = ClariFiEngine()
 
             import json
-            from datetime import datetime
 
             def format_portfolio_table(portfolios):
                 """Format portfolios as a clean table"""
