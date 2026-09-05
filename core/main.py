@@ -2781,6 +2781,27 @@ def main():
     suggest_parser.add_argument('--limit', type=int, default=10, help='Maximum number of suggestions to show (default: 10)')
     suggest_parser.add_argument('--min-score', type=float, default=55.0, help='Minimum composite score threshold (default: 55.0)')
 
+    daytrade_parser = subparsers.add_parser(
+        'daytrade',
+        help='⚡ Scout and execute intraday / daytrading strategies',
+        description='Scout stocks with the best intraday odds, generate High-Risk and Low-Risk trading strategies with morning entry triggers and evening exits, and optionally run in a continuous live monitoring loop with shadow/paper trading.',
+        epilog=(
+            "Examples:\n"
+            "  ./clarifi.sh daytrade --scout\n"
+            "  ./clarifi.sh daytrade --tickers AAPL,TSLA,NVDA --mode both\n"
+            "  ./clarifi.sh daytrade --tickers PLTR,COIN --loop --interval 10 --shadow\n"
+        )
+    )
+    daytrade_parser.add_argument('--tickers', '-t', help='Comma-separated ticker list to target')
+    daytrade_parser.add_argument('--scout', action='store_true', help='Scout and rank top intraday stocks from market universe')
+    daytrade_parser.add_argument('--top-n', type=int, default=10, help='Number of scouted candidates to return (default: 10)')
+    daytrade_parser.add_argument('--mode', choices=['high-risk', 'low-risk', 'both'], default='both', help='Strategy profile mode (default: both)')
+    daytrade_parser.add_argument('--loop', action='store_true', help='Run in continuous live monitoring loop')
+    daytrade_parser.add_argument('--interval', type=int, default=10, help='Loop poll interval in seconds (default: 10)')
+    daytrade_parser.add_argument('--shadow', action='store_true', default=True, help='Enable intraday paper/shadow trading simulation')
+    daytrade_parser.add_argument('--no-shadow', dest='shadow', action='store_false', help='Disable paper trading simulation')
+    daytrade_parser.add_argument('--ticks', type=int, default=None, help='Max ticks to run in loop mode (useful for testing)')
+
     # ML analysis
     ml_parser = subparsers.add_parser('ml_analyze', help='Machine Learning analysis with Random Forest, XGBoost, LightGBM')
     ml_parser.add_argument('tickers', nargs='+', help='Stock ticker symbols')
@@ -3818,6 +3839,125 @@ def main():
                 print(f"\nCached suggestions (still within 24h cooldown):")
                 for item in cached_entries:
                     print(f"  [CACHED, {item['cached_age_hours']:.1f}h ago, expires in {item['cache_expires_in_hours']:.1f}h] {item['symbol']}: score={item['score']:.2f} | {item['reason']}")
+
+        elif args.command == 'daytrade':
+            from core.intraday_screener import IntradayScreener
+            from core.intraday_strategy import IntradayStrategyGenerator
+            from core.intraday_monitor import IntradayLoopMonitor
+            from core.intraday_simulator import IntradaySimulator
+
+            screener = IntradayScreener()
+            strategy_gen = IntradayStrategyGenerator(screener)
+            simulator = IntradaySimulator()
+
+            # 1. Determine tickers to evaluate
+            target_tickers = []
+            if args.tickers:
+                target_tickers = [t.strip().upper() for t in args.tickers.split(',') if t.strip()]
+
+            # 2. Scout if requested or if no tickers supplied
+            candidates = []
+            if args.scout or not target_tickers:
+                candidates = screener.scout_market(tickers=target_tickers if target_tickers else None, top_n=args.top_n)
+                if not target_tickers:
+                    target_tickers = [c.ticker for c in candidates]
+
+            # Mode mapping
+            profile_mode = 'BOTH' if args.mode == 'both' else ('HIGH_RISK' if args.mode == 'high-risk' else 'LOW_RISK')
+
+            # 3. Continuous Loop Mode
+            if args.loop:
+                if not target_tickers:
+                    print("⚠️  No suitable tickers found to monitor.")
+                    return
+                monitor = IntradayLoopMonitor(
+                    simulator=simulator,
+                    screener=screener,
+                    strategy_gen=strategy_gen,
+                    poll_interval_seconds=args.interval,
+                    enable_shadow_trading=args.shadow
+                )
+                monitor.add_stocks(target_tickers, profile=profile_mode)
+                monitor.run_loop(max_ticks=args.ticks)
+                return
+
+            # 4. Generate Strategy Reports
+            reports = {}
+            for t in target_tickers:
+                rep = strategy_gen.generate_for_ticker(t)
+                if rep:
+                    reports[t] = rep.to_dict()
+
+            # Handle JSON output
+            if getattr(args, 'json', False):
+                import json
+                print(json.dumps({
+                    "command": "daytrade",
+                    "mode": args.mode,
+                    "candidates": [c.to_dict() for c in candidates],
+                    "reports": reports
+                }, indent=2))
+                return
+
+            # 5. Render CLI Terminal View
+            if candidates:
+                print(f"\n{Fore.CYAN}{Style.BRIGHT}{'=' * 80}")
+                print(f" 🔎 Top Intraday Opportunity Candidates (Scouted by ClariFi Engine)")
+                print(f"{'=' * 80}{Style.RESET_ALL}")
+                print(f"{'Ticker':<7} {'Price':<9} {'Gap %':<9} {'RVOL':<7} {'ATR':<8} {'ATR %':<8} {'VWAP':<9} {'Odds Score':<11} {'Suitability'}")
+                print(f"{'-' * 80}")
+                for c in candidates:
+                    gap_color = Fore.GREEN if c.gap_pct >= 0 else Fore.RED
+                    print(
+                        f"{Fore.WHITE}{Style.BRIGHT}{c.ticker:<7}{Style.RESET_ALL} "
+                        f"${c.current_price:<8.2f} "
+                        f"{gap_color}{c.gap_pct:>+6.2f}%{Style.RESET_ALL}  "
+                        f"{c.rvol:<6.2f}x "
+                        f"${c.atr:<7.2f} "
+                        f"{c.atr_pct:>5.1f}%   "
+                        f"${c.vwap:<8.2f} "
+                        f"{Fore.YELLOW}{c.intraday_odds_score:>5.1f}/100{Style.RESET_ALL}    "
+                        f"{', '.join(c.suitable_profiles)}"
+                    )
+
+            if reports:
+                print(f"\n{Fore.CYAN}{Style.BRIGHT}{'=' * 80}")
+                print(f" ⚡ Actionable Intraday Strategies (Morning Entry & Evening Exit)")
+                print(f"{'=' * 80}{Style.RESET_ALL}")
+
+                for ticker, rep in reports.items():
+                    hr = rep['high_risk_strategy']
+                    lr = rep['low_risk_strategy']
+
+                    print(f"\n{Fore.YELLOW}{Style.BRIGHT}=== {ticker} (Current: ${rep['current_price']:.2f} | Intraday Odds: {rep['intraday_odds_score']}/100) ==={Style.RESET_ALL}")
+
+                    if args.mode in ('both', 'high-risk'):
+                        print(f"\n  {Fore.RED}{Style.BRIGHT}🔥 STRATEGY 1: HIGH RISK - HIGH REWARD{Style.RESET_ALL}")
+                        print(f"    • Entry Window : {hr['entry_window']}")
+                        print(f"    • Trigger      : {hr['entry_condition']}")
+                        print(f"    • Stop Loss    : {Fore.RED}${hr['stop_loss_price']:.2f} (-{hr['stop_loss_pct']:.2f}%){Style.RESET_ALL}")
+                        print(f"    • Target 1     : {Fore.GREEN}${hr['target_1_price']:.2f} (+{hr['target_1_pct']:.2f}%){Style.RESET_ALL}")
+                        if hr['target_2_price']:
+                            print(f"    • Target 2     : {Fore.GREEN}${hr['target_2_price']:.2f} (+{hr['target_2_pct']:.2f}%){Style.RESET_ALL}")
+                        print(f"    • Risk/Reward  : {hr['risk_reward_ratio']:.2f}x")
+                        print(f"    • Evening Exit : {Fore.YELLOW}{hr['evening_exit_time']}{Style.RESET_ALL}")
+                        print(f"    • Sizing       : {hr['position_sizing_pct']:.1f}% portfolio risk")
+
+                    if args.mode in ('both', 'low-risk'):
+                        print(f"\n  {Fore.GREEN}{Style.BRIGHT}🛡️ STRATEGY 2: SAFER LOW RISK{Style.RESET_ALL}")
+                        print(f"    • Entry Window : {lr['entry_window']}")
+                        print(f"    • Trigger      : {lr['entry_condition']}")
+                        print(f"    • Stop Loss    : {Fore.RED}${lr['stop_loss_price']:.2f} (-{lr['stop_loss_pct']:.2f}%){Style.RESET_ALL}")
+                        print(f"    • Target 1     : {Fore.GREEN}${lr['target_1_price']:.2f} (+{lr['target_1_pct']:.2f}%){Style.RESET_ALL}")
+                        if lr['target_2_price']:
+                            print(f"    • Target 2     : {Fore.GREEN}${lr['target_2_price']:.2f} (+{lr['target_2_pct']:.2f}%){Style.RESET_ALL}")
+                        print(f"    • Risk/Reward  : {lr['risk_reward_ratio']:.2f}x")
+                        print(f"    • Evening Exit : {Fore.YELLOW}{lr['evening_exit_time']}{Style.RESET_ALL}")
+                        print(f"    • Sizing       : {lr['position_sizing_pct']:.1f}% portfolio risk")
+
+                print(f"\n{'=' * 80}")
+                print(f"💡 Tip: Run continuous live monitor with: ./clarifi.sh daytrade --tickers {','.join(target_tickers[:3])} --loop")
+                print(f"{'=' * 80}\n")
 
         elif args.command == 'ml_analyze':
             # Check if ML dependencies are available
