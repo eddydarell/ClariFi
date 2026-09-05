@@ -33,6 +33,7 @@ from intraday_screener import IntradayScreener
 from intraday_strategy import IntradayStrategyGenerator
 from intraday_simulator import IntradaySimulator
 from intraday_monitor import IntradayLoopMonitor
+from intraday_agent import AutonomousIntradayAgent
 
 
 class ClariFiEngine:
@@ -60,6 +61,7 @@ class ClariFiEngine:
         self.intraday_screener = IntradayScreener(self.quote_provider)
         self.intraday_strategy_generator = IntradayStrategyGenerator(self.intraday_screener)
         self.intraday_simulator = IntradaySimulator(self.db_manager)
+        self.intraday_agent = AutonomousIntradayAgent()
 
     def _make_json_serializable(self, obj):
         """Convert pandas objects and numpy types to JSON-serializable Python types."""
@@ -1258,7 +1260,8 @@ class ClariFiEngine:
         tickers: List[str],
         profile: str = "BOTH",
         poll_interval: int = 10,
-        enable_shadow: bool = True
+        enable_shadow: bool = True,
+        agent: Optional[AutonomousIntradayAgent] = None
     ) -> IntradayLoopMonitor:
         """
         Creates and configures an IntradayLoopMonitor for real-time tracking.
@@ -1268,6 +1271,7 @@ class ClariFiEngine:
             simulator=self.intraday_simulator,
             screener=self.intraday_screener,
             strategy_gen=self.intraday_strategy_generator,
+            agent=agent or self.intraday_agent,
             poll_interval_seconds=poll_interval,
             enable_shadow_trading=enable_shadow
         )

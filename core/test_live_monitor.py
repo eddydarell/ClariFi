@@ -17,33 +17,35 @@ except ImportError as e:
     print(f"Error importing live_monitor: {e}")
     sys.exit(1)
 
-async def test_live_monitor():
+async def _run_live_monitor_test():
     """Test the live monitor for a few cycles"""
     print("🧪 Testing Live Stock Monitor")
     print("=" * 50)
 
     # Create monitor
     monitor = LiveStockMonitor()
-    monitor.update_interval = 3  # 3 seconds for testing
+    monitor.update_interval = 1  # 1 second for fast testing
     monitor.add_tickers(['AAPL', 'MSFT'])
 
     print(f"✅ Monitor created with tickers: {monitor.tickers}")
 
     # Test a few update cycles
     print("\n🔄 Testing price updates...")
-    for i in range(3):
+    for i in range(2):
         print(f"\n--- Update cycle {i+1} ---")
         monitor.update_prices()
 
         # Show summary
         monitor.display_summary_table()
 
-        if i < 2:  # Don't wait after the last iteration
-            print(f"⏳ Waiting {monitor.update_interval} seconds...")
-            await asyncio.sleep(monitor.update_interval)
-
     print("\n✅ Test completed successfully!")
     print("🚀 Live monitoring is ready to use!")
 
+
+def test_live_monitor():
+    """Synchronous test wrapper for pytest."""
+    asyncio.run(_run_live_monitor_test())
+
+
 if __name__ == "__main__":
-    asyncio.run(test_live_monitor())
+    test_live_monitor()

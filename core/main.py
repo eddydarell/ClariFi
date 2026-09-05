@@ -2800,6 +2800,8 @@ def main():
     daytrade_parser.add_argument('--interval', type=int, default=10, help='Loop poll interval in seconds (default: 10)')
     daytrade_parser.add_argument('--shadow', action='store_true', default=True, help='Enable intraday paper/shadow trading simulation')
     daytrade_parser.add_argument('--no-shadow', dest='shadow', action='store_false', help='Disable paper trading simulation')
+    daytrade_parser.add_argument('--agent', action='store_true', default=True, help='Enable autonomous AI agent decision-making in live loop')
+    daytrade_parser.add_argument('--no-agent', dest='agent', action='store_false', help='Disable autonomous AI agent in live loop')
     daytrade_parser.add_argument('--ticks', type=int, default=None, help='Max ticks to run in loop mode (useful for testing)')
 
     # ML analysis
@@ -3845,10 +3847,12 @@ def main():
             from core.intraday_strategy import IntradayStrategyGenerator
             from core.intraday_monitor import IntradayLoopMonitor
             from core.intraday_simulator import IntradaySimulator
+            from core.intraday_agent import AutonomousIntradayAgent
 
             screener = IntradayScreener()
             strategy_gen = IntradayStrategyGenerator(screener)
             simulator = IntradaySimulator()
+            agent = AutonomousIntradayAgent(preferred_profile='BOTH' if args.mode == 'both' else ('HIGH_RISK' if args.mode == 'high-risk' else 'LOW_RISK')) if getattr(args, 'agent', True) else None
 
             # 1. Determine tickers to evaluate
             target_tickers = []
@@ -3874,6 +3878,7 @@ def main():
                     simulator=simulator,
                     screener=screener,
                     strategy_gen=strategy_gen,
+                    agent=agent,
                     poll_interval_seconds=args.interval,
                     enable_shadow_trading=args.shadow
                 )

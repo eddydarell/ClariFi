@@ -44,6 +44,7 @@ from market_quote_provider import MarketQuoteProvider
 from intraday_screener import IntradayScreener, IntradayCandidate
 from intraday_strategy import IntradayStrategyGenerator, DualIntradayReport, IntradayTradePlan
 from intraday_simulator import IntradaySimulator, SimulatedIntradayTrade
+from intraday_agent import AutonomousIntradayAgent, IntradayAgentContext, AgentDecision
 
 
 @dataclass
@@ -60,6 +61,7 @@ class MonitoredStockState:
     lowest_price: float = 0.0
     active_plan: Optional[IntradayTradePlan] = None
     shadow_trade: Optional[SimulatedIntradayTrade] = None
+    latest_decision: Optional[AgentDecision] = None
     messages: List[str] = field(default_factory=list)
 
 
@@ -74,6 +76,7 @@ class IntradayLoopMonitor:
         simulator: Optional[IntradaySimulator] = None,
         screener: Optional[IntradayScreener] = None,
         strategy_gen: Optional[IntradayStrategyGenerator] = None,
+        agent: Optional[AutonomousIntradayAgent] = None,
         poll_interval_seconds: int = 10,
         enable_shadow_trading: bool = True
     ):
@@ -81,6 +84,7 @@ class IntradayLoopMonitor:
         self.screener = screener or IntradayScreener(self.quote_provider)
         self.strategy_gen = strategy_gen or IntradayStrategyGenerator(self.screener)
         self.simulator = simulator or IntradaySimulator()
+        self.agent = agent or AutonomousIntradayAgent()
         self.poll_interval = poll_interval_seconds
         self.enable_shadow = enable_shadow_trading
         self.monitored_stocks: Dict[str, MonitoredStockState] = {}
@@ -110,7 +114,7 @@ class IntradayLoopMonitor:
                 active_plan=plan
             )
 
-            # Auto-open shadow trade if enabled
+            # Auto-open shadow trade if enabled and initially triggered
             if self.enable_shadow and plan:
                 state.shadow_trade = self.simulator.open_paper_trade(plan)
                 state.state = "ENTERED"
@@ -122,10 +126,17 @@ class IntradayLoopMonitor:
     def poll_once(self) -> List[Dict[str, Any]]:
         """
         Executes a single polling iteration across all monitored stocks.
+        Invokes the AI Intraday Agent to evaluate entries, stops, and targets.
         """
         self.tick_count += 1
-        now_str = datetime.now().strftime("%H:%M:%S")
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%H:%M:%S")
         events = []
+
+        # Calculate minutes to 15:55 EST (16:00 close - 5 mins)
+        target_eod_min = 15 * 60 + 55
+        current_day_min = now_dt.hour * 60 + now_dt.minute
+        minutes_to_close = max(0, target_eod_min - current_day_min)
 
         for ticker, state in self.monitored_stocks.items():
             quote = self.quote_provider.get_quote(ticker)
@@ -139,8 +150,68 @@ class IntradayLoopMonitor:
             state.highest_price = max(state.highest_price, price)
             state.lowest_price = min(state.lowest_price, price)
 
+            # Running P&L
+            unrealized_pnl = 0.0
+            if state.entry_price > 0:
+                unrealized_pnl = ((price - state.entry_price) / state.entry_price) * 100
+
+            cand = state.report.candidate_summary
+            vwap = cand.get('vwap', price)
+            vwap_dist = ((price - vwap) / vwap) * 100 if vwap > 0 else 0.0
+
+            # 1. Build Agent Context
+            ctx = IntradayAgentContext(
+                ticker=ticker,
+                current_price=price,
+                previous_price=state.previous_price,
+                high_price=state.highest_price,
+                low_price=state.lowest_price,
+                vwap=vwap,
+                vwap_distance_pct=vwap_dist,
+                rvol=cand.get('rvol', 1.0),
+                atr=cand.get('atr', price * 0.02),
+                atr_pct=cand.get('atr_pct', 2.0),
+                gap_pct=cand.get('gap_pct', 0.0),
+                odds_score=state.report.intraday_odds_score,
+                position_status=state.state,
+                entry_price=state.entry_price,
+                unrealized_pnl_pct=round(unrealized_pnl, 2),
+                active_plan=state.active_plan,
+                current_time_str=now_str,
+                minutes_to_eod_close=minutes_to_close
+            )
+
+            # 2. Invoke Autonomous AI Agent
+            decision = self.agent.evaluate_tick(ctx)
+            state.latest_decision = decision
+
+            # 3. Handle Agent Actions
+            if decision.action == 'BUY' and state.state == 'WATCHING' and state.active_plan:
+                state.state = 'ENTERED'
+                state.entry_price = price
+                if self.enable_shadow:
+                    state.shadow_trade = self.simulator.open_paper_trade(state.active_plan, fill_price=price)
+                msg = f"[{now_str}] 🤖 AGENT BUY: Entered {ticker} at ${price:.2f} ({decision.reasoning[0] if decision.reasoning else ''})"
+                state.messages.append(msg)
+                events.append({'ticker': ticker, 'action': 'AGENT_BUY', 'price': price, 'decision': decision.to_dict()})
+
+            elif decision.action == 'TIGHTEN_STOP' and decision.new_stop_price and state.active_plan:
+                old_stop = state.active_plan.stop_loss_price
+                state.active_plan.stop_loss_price = decision.new_stop_price
+                if state.shadow_trade and state.shadow_trade.id in self.simulator.active_trades:
+                    self.simulator.active_trades[state.shadow_trade.id].stop_loss_price = decision.new_stop_price
+                msg = f"[{now_str}] 🤖 AGENT TIGHTEN STOP: ${old_stop:.2f} ➔ ${decision.new_stop_price:.2f}"
+                state.messages.append(msg)
+                events.append({'ticker': ticker, 'action': 'AGENT_TIGHTEN_STOP', 'new_stop': decision.new_stop_price})
+
+            elif decision.action in ('TAKE_PROFIT', 'STOP_LOSS_EXIT', 'FORCE_EOD_EXIT') and state.state == 'ENTERED':
+                state.state = 'TARGET_HIT' if decision.action == 'TAKE_PROFIT' else ('STOP_HIT' if decision.action == 'STOP_LOSS_EXIT' else 'EOD_CLOSED')
+                msg = f"[{now_str}] 🤖 AGENT {decision.action}: ${price:.2f} (P&L: {unrealized_pnl:+.2f}%)"
+                state.messages.append(msg)
+                events.append({'ticker': ticker, 'action': decision.action, 'price': price, 'pnl_pct': unrealized_pnl})
+
             # Check paper trade / threshold logic
-            if self.enable_shadow and self.simulator:
+            if self.enable_shadow and self.simulator and state.state == 'ENTERED':
                 tick_events = self.simulator.update_with_tick(ticker, price, now_str)
                 for ev in tick_events:
                     events.append(ev)
@@ -151,29 +222,19 @@ class IntradayLoopMonitor:
                     elif 'TARGET' in ev['event']:
                         state.state = "TARGET_HIT"
 
-            # Check if near stop or target
-            plan = state.active_plan
-            if plan and state.state == "ENTERED":
-                dist_stop_pct = ((price - plan.stop_loss_price) / price) * 100
-                dist_target_pct = ((plan.target_1_price - price) / price) * 100
-                if dist_stop_pct < 0.5:
-                    events.append({'ticker': ticker, 'alert': 'NEAR_STOP_LOSS', 'price': price})
-                elif dist_target_pct < 0.5:
-                    events.append({'ticker': ticker, 'alert': 'NEAR_PROFIT_TARGET', 'price': price})
-
         return events
 
     def render_dashboard(self):
-        """Renders a colorized live terminal dashboard."""
+        """Renders a colorized live terminal dashboard with AI Agent telemetry."""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         os.system('cls' if os.name == 'nt' else 'clear')
 
-        print(f"{Fore.CYAN}{Style.BRIGHT}{'=' * 80}")
-        print(f" 🚀 ClariFi Intraday Strategy Engine & Live Monitor | Tick #{self.tick_count} | {now_str}")
-        print(f"{'=' * 80}{Style.RESET_ALL}\n")
+        print(f"{Fore.CYAN}{Style.BRIGHT}{'=' * 88}")
+        print(f" 🤖 ClariFi Autonomous Intraday AI Agent & Live Monitor | Tick #{self.tick_count} | {now_str}")
+        print(f"{'=' * 88}{Style.RESET_ALL}\n")
 
-        print(f"{'Ticker':<7} {'Price':<10} {'Change':<12} {'Strategy':<11} {'Status':<12} {'Stop Loss':<11} {'Target 1':<11} {'R/R':<6} {'P&L %':<8}")
-        print(f"{'-' * 80}")
+        print(f"{'Ticker':<7} {'Price':<10} {'Change':<10} {'Strategy':<11} {'Status':<12} {'Stop Loss':<10} {'Target 1':<10} {'P&L %':<8} {'Agent Action'}")
+        print(f"{'-' * 88}")
 
         for ticker, state in self.monitored_stocks.items():
             diff = state.current_price - state.previous_price
@@ -192,7 +253,6 @@ class IntradayLoopMonitor:
             plan = state.active_plan
             stop_str = f"${plan.stop_loss_price:.2f}" if plan else "N/A"
             target_str = f"${plan.target_1_price:.2f}" if plan else "N/A"
-            rr_str = f"{plan.risk_reward_ratio:.1f}x" if plan else "N/A"
 
             # Compute running P&L
             if state.entry_price > 0:
@@ -205,17 +265,28 @@ class IntradayLoopMonitor:
 
             status_color = Fore.YELLOW if state.state == "WATCHING" else (Fore.GREEN if state.state == "ENTERED" else Fore.MAGENTA)
 
+            dec = state.latest_decision
+            agent_action_str = f"{dec.action} ({dec.confidence*100:.0f}%)" if dec else "INITIALIZING"
+            agent_color = Fore.GREEN if dec and dec.action in ('BUY', 'TAKE_PROFIT') else (Fore.RED if dec and 'STOP' in dec.action else Fore.CYAN)
+
             print(
                 f"{Fore.WHITE}{Style.BRIGHT}{ticker:<7}{Style.RESET_ALL} "
                 f"{p_color}{arrow} ${state.current_price:<7.2f}{Style.RESET_ALL} "
-                f"{p_color}{diff_pct:>+5.2f}%{Style.RESET_ALL}     "
+                f"{p_color}{diff_pct:>+5.2f}%{Style.RESET_ALL}   "
                 f"{Fore.CYAN}{state.active_profile:<11}{Style.RESET_ALL} "
                 f"{status_color}{state.state:<12}{Style.RESET_ALL} "
-                f"{Fore.RED}{stop_str:<11}{Style.RESET_ALL} "
-                f"{Fore.GREEN}{target_str:<11}{Style.RESET_ALL} "
-                f"{rr_str:<6} "
-                f"{pnl_color}{pnl_str:<8}{Style.RESET_ALL}"
+                f"{Fore.RED}{stop_str:<10}{Style.RESET_ALL} "
+                f"{Fore.GREEN}{target_str:<10}{Style.RESET_ALL} "
+                f"{pnl_color}{pnl_str:<8}{Style.RESET_ALL} "
+                f"{agent_color}{agent_action_str}{Style.RESET_ALL}"
             )
+
+        # Print recent agent decision rationales
+        print(f"\n{Fore.CYAN}--- AI Agent Decision Log ---{Style.RESET_ALL}")
+        for ticker, state in self.monitored_stocks.items():
+            if state.latest_decision and state.latest_decision.reasoning:
+                latest_reason = state.latest_decision.reasoning[0]
+                print(f"  • {Fore.YELLOW}{ticker}{Style.RESET_ALL}: [{state.latest_decision.action}] {latest_reason}")
 
         # Print simulator stats
         if self.enable_shadow:
