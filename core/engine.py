@@ -29,6 +29,11 @@ from options_analyzer import OptionsAnalyzer, InvestmentAdvisor
 from seasonal_analyzer import SeasonalAnalyzer
 from ml_analyzer import MLAnalyzer
 from strategy_analyzer import StrategyAnalyzer
+from intraday_screener import IntradayScreener
+from intraday_strategy import IntradayStrategyGenerator
+from intraday_simulator import IntradaySimulator
+from intraday_monitor import IntradayLoopMonitor
+from intraday_agent import AutonomousIntradayAgent
 
 
 class ClariFiEngine:
@@ -53,6 +58,10 @@ class ClariFiEngine:
         self.investment_advisor = InvestmentAdvisor()
         self.seasonal_analyzer = SeasonalAnalyzer()
         self.ml_analyzer = MLAnalyzer()
+        self.intraday_screener = IntradayScreener(self.quote_provider)
+        self.intraday_strategy_generator = IntradayStrategyGenerator(self.intraday_screener)
+        self.intraday_simulator = IntradaySimulator(self.db_manager)
+        self.intraday_agent = AutonomousIntradayAgent()
 
     def _make_json_serializable(self, obj):
         """Convert pandas objects and numpy types to JSON-serializable Python types."""
@@ -1196,3 +1205,76 @@ class ClariFiEngine:
         kwargs.setdefault('include_deep', True)
         kwargs.setdefault('deep_chunk_months', chunk_months)
         return self.comprehensive_analysis(tickers=tickers, period=period, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Intraday / Daytrading Engine APIs
+    # ------------------------------------------------------------------
+    def intraday_scout(
+        self,
+        tickers: Optional[List[str]] = None,
+        top_n: int = 10,
+        min_score: float = 40.0
+    ) -> Dict[str, Any]:
+        """
+        Scouts and ranks the best intraday stocks using volume surge, gap, and volatility metrics.
+        """
+        start_time = time.time()
+        candidates = self.intraday_screener.scout_market(tickers=tickers, top_n=top_n, min_score=min_score)
+        candidates_data = [c.to_dict() for c in candidates]
+
+        return {
+            "success": True,
+            "count": len(candidates_data),
+            "candidates": candidates_data,
+            "execution_time": round(time.time() - start_time, 2),
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def generate_intraday_strategies(
+        self,
+        tickers: List[str],
+        profile: str = "BOTH"
+    ) -> Dict[str, Any]:
+        """
+        Generates High-Risk and Low-Risk intraday strategies for given tickers.
+        """
+        start_time = time.time()
+        reports = {}
+
+        for ticker in tickers:
+            ticker = ticker.strip().upper()
+            report = self.intraday_strategy_generator.generate_for_ticker(ticker)
+            if report:
+                reports[ticker] = report.to_dict()
+
+        return {
+            "success": True,
+            "count": len(reports),
+            "reports": reports,
+            "execution_time": round(time.time() - start_time, 2),
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def create_intraday_monitor(
+        self,
+        tickers: List[str],
+        profile: str = "BOTH",
+        poll_interval: int = 10,
+        enable_shadow: bool = True,
+        agent: Optional[AutonomousIntradayAgent] = None
+    ) -> IntradayLoopMonitor:
+        """
+        Creates and configures an IntradayLoopMonitor for real-time tracking.
+        """
+        monitor = IntradayLoopMonitor(
+            quote_provider=self.quote_provider,
+            simulator=self.intraday_simulator,
+            screener=self.intraday_screener,
+            strategy_gen=self.intraday_strategy_generator,
+            agent=agent or self.intraday_agent,
+            poll_interval_seconds=poll_interval,
+            enable_shadow_trading=enable_shadow
+        )
+        monitor.add_stocks(tickers, profile=profile)
+        return monitor
+

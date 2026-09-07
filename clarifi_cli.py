@@ -195,6 +195,18 @@ def _delegate_to_legacy(command_args: list[str], pretty: bool) -> tuple[int, str
     cmd = [sys.executable, str(CORE_MAIN)]
     forwarded = list(command_args)
 
+    is_interactive_loop = "--loop" in forwarded or (forwarded and forwarded[0] in {"live_monitor", "demo_live_monitor"})
+
+    if is_interactive_loop:
+        if "--json" in forwarded:
+            forwarded.remove("--json")
+        cmd.extend(forwarded)
+        try:
+            completed = subprocess.run(cmd)
+            return completed.returncode, "", ""
+        except KeyboardInterrupt:
+            return 130, "", ""
+
     if "--json" in forwarded:
         forwarded.remove("--json")
     if not pretty:
@@ -258,7 +270,12 @@ def main() -> int:
         except Exception as exc:
             return _emit(_err("ingest", "INGEST_ERROR", str(exc)), indent=indent, exit_code=5)
 
+    is_interactive_loop = "--loop" in delegated_args or command in {"live_monitor", "demo_live_monitor"}
+
     rc, stdout, stderr = _delegate_to_legacy(delegated_args, pretty=pretty)
+    if is_interactive_loop:
+        return rc
+
     if pretty:
         sys.stdout.write(_sanitize_output(stdout))
         sys.stderr.write(_sanitize_output(stderr))

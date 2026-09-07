@@ -16,6 +16,7 @@ import yfinance as yf
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except Exception:  # pragma: no cover - optional dependency
     pass
@@ -36,7 +37,9 @@ class TickerSuggestion:
 class FinnhubAdapter:
     """Lightweight adapter using free-tier endpoints only."""
 
-    def __init__(self, api_key: Optional[str] = None, session: Optional[requests.Session] = None):
+    def __init__(
+        self, api_key: Optional[str] = None, session: Optional[requests.Session] = None
+    ):
         self.api_key = api_key or os.getenv("FINNHUB_API_KEY")
         self.session = session or requests.Session()
         self._rate_limit = deque(maxlen=60)
@@ -49,7 +52,9 @@ class FinnhubAdapter:
             now = time.time()
         self._rate_limit.append(now)
 
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _get(
+        self, path: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         if not self.api_key:
             return {}
 
@@ -90,7 +95,13 @@ class FinnhubAdapter:
             strong_sell = float(latest.get("strongSell", 0) or 0)
 
             total = max(buy + hold + sell + strong_buy + strong_sell, 1.0)
-            bias = ((strong_buy * 2.5) + (buy * 1.2) + (hold * 0.2) - (sell * 1.5) - (strong_sell * 2.8)) / total
+            bias = (
+                (strong_buy * 2.5)
+                + (buy * 1.2)
+                + (hold * 0.2)
+                - (sell * 1.5)
+                - (strong_sell * 2.8)
+            ) / total
             return {
                 "bias": bias,
                 "buy": buy,
@@ -122,16 +133,244 @@ class TickerSuggestionEngine:
     """Custom short-term growth screener for actionable ticker suggestions."""
 
     DEFAULT_UNIVERSE = [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "AVGO",
-        "CRM", "ADBE", "NFLX", "PLTR", "ORCL", "INTC", "QCOM", "CSCO", "IBM",
-        "SHOP", "UBER", "SPY", "QQQ", "XOM", "CVX", "COP", "SLB", "EOG", "MPC",
-        "V", "MA", "PYPL", "SQ", "NKE", "COST", "HD", "WMT", "PFE", "LLY",
-        "UNH", "JPM", "BAC", "GS", "MS", "C", "SCHW", "AXP", "TFC", "USB",
-        "DIS", "CMCSA", "NEM", "FCX", "CAT", "DE", "HON", "UPS", "LOW", "KHC",
-        "SNOW", "HOOD", "COIN", "RIVN", "LCID", "U", "GME", "AMC", "BB", "RIOT",
+        # === ORIGINAL TICKERS ===
+        "AAPL",
+        "MSFT",
+        "GOOGL",
+        "AMZN",
+        "NVDA",
+        "META",
+        "TSLA",
+        "AMD",
+        "AVGO",
+        "CRM",
+        "ADBE",
+        "NFLX",
+        "PLTR",
+        "ORCL",
+        "INTC",
+        "QCOM",
+        "CSCO",
+        "IBM",
+        "SHOP",
+        "UBER",
+        "SPY",
+        "QQQ",
+        "XOM",
+        "CVX",
+        "COP",
+        "SLB",
+        "EOG",
+        "MPC",
+        "V",
+        "MA",
+        "PYPL",
+        "SQ",
+        "NKE",
+        "COST",
+        "HD",
+        "WMT",
+        "PFE",
+        "LLY",
+        "UNH",
+        "JPM",
+        "BAC",
+        "GS",
+        "MS",
+        "C",
+        "SCHW",
+        "AXP",
+        "TFC",
+        "USB",
+        "DIS",
+        "CMCSA",
+        "NEM",
+        "FCX",
+        "CAT",
+        "DE",
+        "HON",
+        "UPS",
+        "LOW",
+        "KHC",
+        "SNOW",
+        "HOOD",
+        "COIN",
+        "RIVN",
+        "LCID",
+        "U",
+        "GME",
+        "AMC",
+        "BB",
+        "RIOT",
+        # === RECENT IPOS (2025-2026) ===
+        "CBRS",  # Cerebras Systems - AI chips
+        "CRWV",  # CoreWeave - AI cloud
+        "CRCL",  # Circle Internet - stablecoins
+        "CHYM",  # Chime Financial - digital banking
+        "HNGE",  # Hinge Health - digital MSK care
+        "FIG",  # Figma - design software
+        "KLAR",  # Klarna - BNPL
+        "NTSK",  # Netskope - cloud security
+        "STUB",  # StubHub - ticketing
+        "NAVN",  # Navan - corporate travel
+        "WLTH",  # Wealthfront - robo-advisor
+        "KRMN",  # Karman Holdings - defense
+        "MTSR",  # Metsera - obesity biotech
+        "LGN",  # Legence Corp - energy transition
+        "FIGR",  # Figure Technology - AI finance
+        "LBRX",  # LB Pharmaceuticals
+        "MIAX",  # Miami International Holdings
+        "AMBQ",  # Ambiq Micro - low-power AI chips
+        "BLSH",  # Bullish - crypto exchange
+        "FLY",  # Firefly Aerospace - space
+        "HTFL",  # HeartFlow - AI cardiac
+        "MDLN",  # Medline Inc
+        "VG",  # Venture Global - LNG
+        "SFD",  # Smithfield Foods
+        # === LESSER-KNOWN / SMALL CAP GROWTH ===
+        "BFLY",  # Butterfly Network - AI ultrasound
+        "PGY",  # Pagaya Technologies - AI lending
+        "SOUN",  # SoundHound AI - voice AI
+        "BBAI",  # BigBear.ai - AI defense
+        "AAOI",  # Applied Optoelectronics - data center optics
+        "AXTI",  # AXT - semiconductor materials
+        "WULF",  # TeraWulf - AI data centers
+        "CIFR",  # Cipher Digital - AI infrastructure
+        "INOD",  # Innodata - AI training data
+        "SEZL",  # Sezzle - BNPL
+        "ARG",  # Argan - power infrastructure
+        "BYRN",  # Byrna Technologies - non-lethal defense
+        "TMDX",  # Transmedics - organ transplant tech
+        "POWL",  # Powell Industries - electrical equipment
+        "ACAD",  # Acadia Pharmaceuticals
+        "VITC",  # Vita Coco
+        "AEVA",  # Aeva Technologies - 4D LiDAR
+        "NUVB",  # Nuvation Bio - oncology
+        "TOI",  # Oncology Institute - cancer care
+        "SOPH",  # SOPHiA GENETICS - genomic AI
+        "ERAS",  # Erasca - precision oncology
+        "PRAX",  # Praxis Precision Medicines
+        # === MISSING BLUE CHIPS ===
+        "GOOG",  # Alphabet Class C
+        "BRK.B",  # Berkshire Hathaway
+        "JNJ",  # Johnson & Johnson
+        "TSM",  # Taiwan Semiconductor
+        "ASML",  # ASML Holding
+        "TXN",  # Texas Instruments
+        "LRCX",  # Lam Research
+        "KLAC",  # KLA Corp
+        "MRVL",  # Marvell
+        "MCHP",  # Microchip
+        "NXPI",  # NXP Semiconductors
+        "MSTR",  # MicroStrategy
+        # === MISSING SOFTWARE / CLOUD ===
+        "RBLX",  # Roblox
+        "DASH",  # DoorDash
+        "ABNB",  # Airbnb
+        "DDOG",  # Datadog
+        "NET",  # Cloudflare
+        "CRWD",  # CrowdStrike
+        "PANW",  # Palo Alto Networks
+        "ZS",  # Zscaler
+        "S",  # SentinelOne
+        "MDB",  # MongoDB
+        "NOW",  # ServiceNow
+        "VEEV",  # Veeva Systems
+        "ZM",  # Zoom
+        "DOCU",  # DocuSign
+        "LYFT",  # Lyft
+        # === MISSING AEROSPACE & DEFENSE ===
+        "RTX",  # RTX Corporation
+        "LMT",  # Lockheed Martin
+        "NOC",  # Northrop Grumman
+        "GD",  # General Dynamics
+        "BA",  # Boeing
+        "GE",  # GE Aerospace
+        "HWM",  # Howmet Aerospace
+        "TDG",  # TransDigm
+        "AXON",  # Axon Enterprise
+        # === MISSING ENERGY & UTILITIES ===
+        "OXY",  # Occidental Petroleum
+        "DVN",  # Devon Energy
+        "FANG",  # Diamondback Energy
+        "EQT",  # EQT Corporation
+        "WMB",  # Williams Companies
+        "KMI",  # Kinder Morgan
+        "ENB",  # Enbridge
+        "LNG",  # Cheniere Energy
+        "VST",  # Vistra Corp (nuclear)
+        "CEG",  # Constellation Energy
+        "NRG",  # NRG Energy
+        "NEE",  # NextEra Energy
+        "DUK",  # Duke Energy
+        "SO",  # Southern Company
+        "ENPH",  # Enphase Energy
+        "FSLR",  # First Solar
+        # === MISSING REITS & INFRASTRUCTURE ===
+        "O",  # Realty Income
+        "VICI",  # VICI Properties
+        "SPG",  # Simon Property Group
+        "PLD",  # Prologis
+        "AMT",  # American Tower
+        "EQIX",  # Equinix
+        "DLR",  # Digital Realty
+        "WELL",  # Welltower
+        # === MISSING HEALTHCARE & MEDTECH ===
+        "HCA",  # HCA Healthcare
+        "DHR",  # Danaher
+        "ABT",  # Abbott
+        "SYK",  # Stryker
+        "ISRG",  # Intuitive Surgical
+        "TMO",  # Thermo Fisher
+        "REGN",  # Regeneron
+        "VRTX",  # Vertex
+        "AMGN",  # Amgen
+        "GILD",  # Gilead
+        "MRNA",  # Moderna
+        "DXCM",  # Dexcom
+        "EW",  # Edwards Lifesciences
+        "BSX",  # Boston Scientific
+        # === MISSING CONSUMER & RETAIL ===
+        "PEP",  # PepsiCo
+        "KO",  # Coca-Cola
+        "PG",  # Procter & Gamble
+        "MCD",  # McDonald's
+        "SBUX",  # Starbucks
+        "CMG",  # Chipotle
+        "MNST",  # Monster Beverage
+        "CELH",  # Celsius Holdings
+        # === MISSING E-COMMERCE & INTERNATIONAL ===
+        "TTD",  # Trade Desk
+        "APP",  # AppLovin
+        "ROKU",  # Roku
+        "SNAP",  # Snap
+        "PINS",  # Pinterest
+        "ETSY",  # Etsy
+        "SE",  # Sea Limited
+        "MELI",  # MercadoLibre
+        "BABA",  # Alibaba
+        "PDD",  # PDD Holdings
+        # === MISSING AUTO & MANUFACTURING ===
+        "TM",  # Toyota
+        "STLA",  # Stellantis
+        "F",  # Ford
+        "GM",  # General Motors
+        "DELL",  # Dell Technologies
+        "HPE",  # HPE
+        # === MISSING MATERIALS & INDUSTRIALS ===
+        "NUE",  # Nucor
+        "ALB",  # Albemarle
+        "MOS",  # Mosaic
+        "ADM",  # Archer Daniels Midland
+        # === MISSING TELECOM ===
+        "VZ",  # Verizon
+        "T",  # AT&T
+        "TMUS",  # T-Mobile
     ]
 
-    def __init__(self, finnhub: Optional[FinnhubAdapter] = None, min_score: float = 55.0):
+    def __init__(
+        self, finnhub: Optional[FinnhubAdapter] = None, min_score: float = 55.0
+    ):
         self.finnhub = finnhub or FinnhubAdapter()
         self.min_score = min_score
 
@@ -218,7 +457,10 @@ class TickerSuggestionEngine:
             0.45 * _normalize(momentum, min_val=-20, max_val=20, midpoint=0)
             + 0.25 * _normalize(volume_signal, min_val=-30, max_val=60, midpoint=0)
             + 0.20 * analyst_score
-            + 0.10 * _normalize(quote_price / max(price, 1.0), min_val=0.8, max_val=1.2, midpoint=1.0)
+            + 0.10
+            * _normalize(
+                quote_price / max(price, 1.0), min_val=0.8, max_val=1.2, midpoint=1.0
+            )
         )
 
         expected_7d_return = momentum * 0.7 + analyst_bias * 5.0 + volume_signal * 0.08
@@ -241,17 +483,23 @@ class TickerSuggestionEngine:
             volume_signal=float(volume_signal),
             analyst_bias=float(analyst_bias),
             risk_flag=risk_flag,
-            reason="; ".join(reason_parts) if reason_parts else "short-term trend and flow improvement",
+            reason="; ".join(reason_parts)
+            if reason_parts
+            else "short-term trend and flow improvement",
         )
 
-    def discover_suggestions(self, universe: Optional[List[str]] = None, limit: int = 10) -> List[TickerSuggestion]:
+    def discover_suggestions(
+        self, universe: Optional[List[str]] = None, limit: int = 10
+    ) -> List[TickerSuggestion]:
         universe = universe or self.DEFAULT_UNIVERSE
         results: List[TickerSuggestion] = []
 
         for symbol in universe:
             normalized_symbol = str(symbol).upper()
             try:
-                history = yf.Ticker(normalized_symbol).history(period="1mo", interval="1d")
+                history = yf.Ticker(normalized_symbol).history(
+                    period="1mo", interval="1d"
+                )
                 suggestion = self._score_ticker(normalized_symbol, history)
                 if suggestion is not None:
                     results.append(suggestion)
@@ -262,15 +510,25 @@ class TickerSuggestionEngine:
         return results[:limit]
 
 
-def _normalize(value: float, min_val: float, max_val: float, midpoint: float = 0.0) -> float:
+def _normalize(
+    value: float, min_val: float, max_val: float, midpoint: float = 0.0
+) -> float:
     if math.isnan(value):
         return 0.0
     capped = max(min_val, min(max_val, value))
     if midpoint == 0.0:
         return ((capped - min_val) / (max_val - min_val)) * 100.0
     if value >= midpoint:
-        return ((value - midpoint) / (max_val - midpoint)) * 100.0 if max_val > midpoint else 100.0
-    return ((value - min_val) / (midpoint - min_val)) * 100.0 if midpoint > min_val else 0.0
+        return (
+            ((value - midpoint) / (max_val - midpoint)) * 100.0
+            if max_val > midpoint
+            else 100.0
+        )
+    return (
+        ((value - min_val) / (midpoint - min_val)) * 100.0
+        if midpoint > min_val
+        else 0.0
+    )
 
 
 def run_suggestion_cycle() -> None:
@@ -278,16 +536,21 @@ def run_suggestion_cycle() -> None:
     suggestions = engine.discover_suggestions(limit=10)
 
     for item in suggestions:
-        print(json.dumps({
-            "symbol": item.symbol,
-            "score": round(item.score, 2),
-            "expected_7d_return": round(item.expected_7d_return, 2),
-            "momentum": round(item.momentum, 2),
-            "volume_signal": round(item.volume_signal, 2),
-            "analyst_bias": round(item.analyst_bias, 2),
-            "risk_flag": item.risk_flag,
-            "reason": item.reason,
-        }, separators=(",", ":")))
+        print(
+            json.dumps(
+                {
+                    "symbol": item.symbol,
+                    "score": round(item.score, 2),
+                    "expected_7d_return": round(item.expected_7d_return, 2),
+                    "momentum": round(item.momentum, 2),
+                    "volume_signal": round(item.volume_signal, 2),
+                    "analyst_bias": round(item.analyst_bias, 2),
+                    "risk_flag": item.risk_flag,
+                    "reason": item.reason,
+                },
+                separators=(",", ":"),
+            )
+        )
 
 
 if __name__ == "__main__":

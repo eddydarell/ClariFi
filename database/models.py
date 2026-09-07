@@ -14,24 +14,37 @@ DATABASE_PATH = "clarifi.db"
 
 
 class DatabaseManager:
-
-    def insert_event(self, event_date: str, event: str, category: str, impact: str, summary: str = "", link: str = "", event_id: Optional[str] = None):
+    def insert_event(
+        self,
+        event_date: str,
+        event: str,
+        category: str,
+        impact: str,
+        summary: str = "",
+        link: str = "",
+        event_id: Optional[str] = None,
+    ):
         """Insert a new event into the events table."""
         if event_id is None:
             event_id = str(uuid.uuid4())
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT OR REPLACE INTO events (id, event_date, event, category, impact, summary, link)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (event_id, event_date, event, category, impact, summary, link))
+            """,
+                (event_id, event_date, event, category, impact, summary, link),
+            )
             conn.commit()
 
     def get_all_events(self) -> List[Dict[str, Any]]:
         """Fetch all events from the events table."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id, event_date, event, category, impact, summary, link, created_at FROM events ORDER BY event_date ASC')
+            cursor.execute(
+                "SELECT id, event_date, event, category, impact, summary, link, created_at FROM events ORDER BY event_date ASC"
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def upsert_ticker_price_rows(self, ticker: str, rows: List[Dict[str, Any]]) -> int:
@@ -43,7 +56,8 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             for row in rows:
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO ticker_prices (
                         id, ticker, price_date, open, high, low, close, adj_close, volume
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -54,32 +68,36 @@ class DatabaseManager:
                         close=excluded.close,
                         adj_close=excluded.adj_close,
                         volume=excluded.volume
-                ''', (
-                    str(uuid.uuid4()),
-                    normalized_ticker,
-                    row.get('price_date'),
-                    row.get('open'),
-                    row.get('high'),
-                    row.get('low'),
-                    row.get('close'),
-                    row.get('adj_close'),
-                    row.get('volume'),
-                ))
+                """,
+                    (
+                        str(uuid.uuid4()),
+                        normalized_ticker,
+                        row.get("price_date"),
+                        row.get("open"),
+                        row.get("high"),
+                        row.get("low"),
+                        row.get("close"),
+                        row.get("adj_close"),
+                        row.get("volume"),
+                    ),
+                )
                 inserted += 1
             conn.commit()
         return inserted
 
-    def get_ticker_prices(self, ticker: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_ticker_prices(
+        self, ticker: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Fetch OHLCV rows for ticker ordered by date ascending."""
-        query = '''
+        query = """
             SELECT ticker, price_date, open, high, low, close, adj_close, volume
             FROM ticker_prices
             WHERE ticker = ?
             ORDER BY price_date ASC
-        '''
+        """
         params: List[Any] = [ticker.upper()]
         if limit is not None:
-            query += ' LIMIT ?'
+            query += " LIMIT ?"
             params.append(limit)
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -90,8 +108,11 @@ class DatabaseManager:
         """Get all tickers that have persisted price data."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT DISTINCT ticker FROM ticker_prices ORDER BY ticker ASC')
-            return [row['ticker'] for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT DISTINCT ticker FROM ticker_prices ORDER BY ticker ASC"
+            )
+            return [row["ticker"] for row in cursor.fetchall()]
+
     """Manages SQLite database operations for ClariFi"""
 
     def __init__(self, db_path: str = DATABASE_PATH):
@@ -103,9 +124,9 @@ class DatabaseManager:
         """Context manager for database connections"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
-        conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute('PRAGMA synchronous=NORMAL')  # safe pairing with WAL
-        conn.execute('PRAGMA foreign_keys=ON')
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")  # safe pairing with WAL
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
         finally:
@@ -117,7 +138,7 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             # Portfolio table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS portfolios (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
@@ -125,10 +146,10 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            """)
 
             # Portfolio tickers table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS portfolio_tickers (
                     id TEXT PRIMARY KEY,
                     portfolio_id TEXT NOT NULL,
@@ -141,10 +162,10 @@ class DatabaseManager:
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE,
                     UNIQUE(portfolio_id, ticker)
                 )
-            ''')
+            """)
 
             # Event table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
                     event_date TEXT NOT NULL,
@@ -155,10 +176,10 @@ class DatabaseManager:
                     link TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            """)
 
             # Ticker OHLCV table (source of truth for historical market data)
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ticker_prices (
                     id TEXT PRIMARY KEY,
                     ticker TEXT NOT NULL,
@@ -172,20 +193,28 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(ticker, price_date)
                 )
-            ''')
+            """)
 
             # events.event_date lookups drive correlation range queries
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_events_category ON events(category)')
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_events_category ON events(category)"
+            )
 
             # Add current_price and updated_at columns if they don't exist (for existing databases)
             try:
-                cursor.execute('ALTER TABLE portfolio_tickers ADD COLUMN current_price REAL DEFAULT 0.0')
+                cursor.execute(
+                    "ALTER TABLE portfolio_tickers ADD COLUMN current_price REAL DEFAULT 0.0"
+                )
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
             try:
-                cursor.execute('ALTER TABLE portfolio_tickers ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                cursor.execute(
+                    "ALTER TABLE portfolio_tickers ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                )
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
@@ -201,7 +230,7 @@ class DatabaseManager:
                 pass
 
             # Analysis results table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS analysis_results (
                     id TEXT PRIMARY KEY,
                     portfolio_id TEXT,
@@ -214,10 +243,10 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE SET NULL
                 )
-            ''')
+            """)
 
             # Analysis history table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS analysis_history (
                     id TEXT PRIMARY KEY,
                     analysis_id TEXT NOT NULL,
@@ -227,10 +256,10 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (analysis_id) REFERENCES analysis_results (id) ON DELETE CASCADE
                 )
-            ''')
+            """)
 
             # Command history table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS command_history (
                     id TEXT PRIMARY KEY,
                     command TEXT NOT NULL,
@@ -241,10 +270,10 @@ class DatabaseManager:
                     error_message TEXT,
                     executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            """)
 
             # Comparison results table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS comparison_results (
                     id TEXT PRIMARY KEY,
                     portfolio_id TEXT,
@@ -258,10 +287,10 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE SET NULL
                 )
-            ''')
+            """)
 
             # Portfolio transactions/changes table
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS portfolio_transactions (
                     id TEXT PRIMARY KEY,
                     portfolio_id TEXT NOT NULL,
@@ -273,11 +302,11 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (portfolio_id) REFERENCES portfolios (id) ON DELETE CASCADE
                 )
-            ''')
+            """)
 
             # Ticker predictions table - per-horizon price/trend forecasts scored against
             # realized prices once each horizon's target date has passed.
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ticker_predictions (
                     id TEXT PRIMARY KEY,
                     ticker TEXT NOT NULL,
@@ -303,24 +332,26 @@ class DatabaseManager:
                     accuracy_score INTEGER,  -- +1 accurate, -1 inaccurate
                     resolved_at TIMESTAMP
                 )
-            ''')
+            """)
 
             for column_name, column_type in (
-                ('decision_status', 'TEXT'),
-                ('evidence_tags', 'TEXT'),
-                ('data_quality', 'TEXT'),
-                ('empirical_validation', 'TEXT'),
-                ('trade_plan_validation', 'TEXT'),
-                ('policy_version', 'TEXT'),
+                ("decision_status", "TEXT"),
+                ("evidence_tags", "TEXT"),
+                ("data_quality", "TEXT"),
+                ("empirical_validation", "TEXT"),
+                ("trade_plan_validation", "TEXT"),
+                ("policy_version", "TEXT"),
             ):
                 try:
-                    cursor.execute(f'ALTER TABLE ticker_predictions ADD COLUMN {column_name} {column_type}')
+                    cursor.execute(
+                        f"ALTER TABLE ticker_predictions ADD COLUMN {column_name} {column_type}"
+                    )
                 except sqlite3.OperationalError:
                     pass
 
             # Suggestion cache table - short-term ticker suggestions are cached for a
             # rolling TTL (default 24h) so the same ticker isn't re-suggested until it expires.
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS suggestion_cache (
                     id TEXT PRIMARY KEY,
                     ticker TEXT NOT NULL,
@@ -334,9 +365,9 @@ class DatabaseManager:
                     cached_at TIMESTAMP NOT NULL,
                     expires_at TIMESTAMP NOT NULL
                 )
-            ''')
+            """)
 
-            cursor.execute('''
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS shadow_trades (
                     id TEXT PRIMARY KEY,
                     ticker TEXT NOT NULL,
@@ -356,22 +387,86 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     closed_at TIMESTAMP
                 )
-            ''')
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS decision_logs (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    ticker TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    confidence REAL,
+                    reasoning TEXT,
+                    context TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS shadow_budgets (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    initial_budget REAL NOT NULL,
+                    current_cash REAL NOT NULL,
+                    invested_amount REAL DEFAULT 0.0,
+                    total_realized_pnl REAL DEFAULT 0.0,
+                    trades_count INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'ACTIVE',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
             # Create indexes for better performance
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_ticker ON analysis_results(ticker)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_prices_lookup ON ticker_prices(ticker, price_date)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_results_portfolio ON analysis_results(portfolio_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_command_history_executed ON command_history(executed_at)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_comparison_results_ticker ON comparison_results(ticker)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_portfolio ON portfolio_transactions(portfolio_id)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_ticker ON portfolio_transactions(ticker)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_ticker ON ticker_predictions(ticker)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_ticker_predictions_due ON ticker_predictions(ticker, resolved, target_date)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_shadow_trades_open ON shadow_trades(ticker, status, entry_date)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_suggestion_cache_ticker ON suggestion_cache(ticker)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_suggestion_cache_expires ON suggestion_cache(expires_at)')
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_portfolio_tickers_portfolio ON portfolio_tickers(portfolio_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_analysis_results_ticker ON analysis_results(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticker_prices_lookup ON ticker_prices(ticker, price_date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_analysis_results_portfolio ON analysis_results(portfolio_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_history_executed ON command_history(executed_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_comparison_results_ticker ON comparison_results(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_portfolio ON portfolio_transactions(portfolio_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_ticker ON portfolio_transactions(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticker_predictions_ticker ON ticker_predictions(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticker_predictions_due ON ticker_predictions(ticker, resolved, target_date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shadow_trades_open ON shadow_trades(ticker, status, entry_date)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestion_cache_ticker ON suggestion_cache(ticker)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestion_cache_expires ON suggestion_cache(expires_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decision_logs_session ON decision_logs(session_id, created_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decision_logs_ticker ON decision_logs(ticker, action)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shadow_budgets_session ON shadow_budgets(session_id, status)"
+            )
 
             conn.commit()
 
@@ -387,10 +482,13 @@ class Portfolio:
         portfolio_id = str(uuid.uuid4())
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO portfolios (id, name, description)
                 VALUES (?, ?, ?)
-            ''', (portfolio_id, name, description))
+            """,
+                (portfolio_id, name, description),
+            )
             conn.commit()
         return portfolio_id
 
@@ -398,14 +496,14 @@ class Portfolio:
         """Get all portfolios"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM portfolios ORDER BY created_at DESC')
+            cursor.execute("SELECT * FROM portfolios ORDER BY created_at DESC")
             return [dict(row) for row in cursor.fetchall()]
 
     def get_by_id(self, portfolio_id: str) -> Optional[Dict[str, Any]]:
         """Get portfolio by ID"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM portfolios WHERE id = ?', (portfolio_id,))
+            cursor.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
 
@@ -413,11 +511,17 @@ class Portfolio:
         """Get portfolio by name"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM portfolios WHERE name = ?', (name,))
+            cursor.execute("SELECT * FROM portfolios WHERE name = ?", (name,))
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def add_ticker(self, portfolio_id: str, ticker: str, quantity: float = 0.0, avg_cost: float = 0.0) -> str:
+    def add_ticker(
+        self,
+        portfolio_id: str,
+        ticker: str,
+        quantity: float = 0.0,
+        avg_cost: float = 0.0,
+    ) -> str:
         """Add a ticker to portfolio"""
         ticker_id = str(uuid.uuid4())
         existing = None
@@ -427,38 +531,56 @@ class Portfolio:
             cursor = conn.cursor()
 
             # Check if ticker already exists
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT id, quantity, avg_cost FROM portfolio_tickers
                 WHERE portfolio_id = ? AND ticker = ?
-            ''', (portfolio_id, ticker.upper()))
+            """,
+                (portfolio_id, ticker.upper()),
+            )
             existing = cursor.fetchone()
 
             if existing:
                 # Update existing ticker
-                cursor.execute('''
+                cursor.execute(
+                    """
                     UPDATE portfolio_tickers
                     SET quantity = ?, avg_cost = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE portfolio_id = ? AND ticker = ?
-                ''', (quantity, avg_cost, portfolio_id, ticker.upper()))
+                """,
+                    (quantity, avg_cost, portfolio_id, ticker.upper()),
+                )
                 ticker_id = existing["id"]
                 is_update = True
             else:
                 # Insert new ticker
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO portfolio_tickers (id, portfolio_id, ticker, quantity, avg_cost)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (ticker_id, portfolio_id, ticker.upper(), quantity, avg_cost))
+                """,
+                    (ticker_id, portfolio_id, ticker.upper(), quantity, avg_cost),
+                )
 
             conn.commit()
 
         # Log transaction after commit to avoid database lock
         if is_update:
-            self._log_transaction(portfolio_id, ticker.upper(), "UPDATE_QUANTITY",
-                                {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
-                                {"quantity": quantity, "avg_cost": avg_cost})
+            self._log_transaction(
+                portfolio_id,
+                ticker.upper(),
+                "UPDATE_QUANTITY",
+                {"quantity": existing["quantity"], "avg_cost": existing["avg_cost"]},
+                {"quantity": quantity, "avg_cost": avg_cost},
+            )
         else:
-            self._log_transaction(portfolio_id, ticker.upper(), "ADD",
-                                None, {"quantity": quantity, "avg_cost": avg_cost})
+            self._log_transaction(
+                portfolio_id,
+                ticker.upper(),
+                "ADD",
+                None,
+                {"quantity": quantity, "avg_cost": avg_cost},
+            )
 
         return ticker_id
 
@@ -468,83 +590,122 @@ class Portfolio:
             cursor = conn.cursor()
 
             # Get current ticker data before deletion
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT quantity, avg_cost, current_price FROM portfolio_tickers
                 WHERE portfolio_id = ? AND ticker = ?
-            ''', (portfolio_id, ticker.upper()))
+            """,
+                (portfolio_id, ticker.upper()),
+            )
             ticker_data = cursor.fetchone()
 
             if ticker_data:
                 # Delete the ticker
-                cursor.execute('''
+                cursor.execute(
+                    """
                     DELETE FROM portfolio_tickers
                     WHERE portfolio_id = ? AND ticker = ?
-                ''', (portfolio_id, ticker.upper()))
+                """,
+                    (portfolio_id, ticker.upper()),
+                )
 
                 # Log transaction
-                self._log_transaction(portfolio_id, ticker.upper(), "REMOVE",
-                                    dict(ticker_data), None)
+                self._log_transaction(
+                    portfolio_id, ticker.upper(), "REMOVE", dict(ticker_data), None
+                )
 
                 conn.commit()
                 return cursor.rowcount > 0
             return False
 
-    def update_ticker_price(self, portfolio_id: str, ticker: str, current_price: float) -> bool:
+    def update_ticker_price(
+        self, portfolio_id: str, ticker: str, current_price: float
+    ) -> bool:
         """Update the current price for a ticker in portfolio"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
 
             # Get old price for transaction log
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT current_price FROM portfolio_tickers
                 WHERE portfolio_id = ? AND ticker = ?
-            ''', (portfolio_id, ticker.upper()))
+            """,
+                (portfolio_id, ticker.upper()),
+            )
             old_data = cursor.fetchone()
             old_price = old_data["current_price"] if old_data else None
 
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE portfolio_tickers
                 SET current_price = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE portfolio_id = ? AND ticker = ?
-            ''', (current_price, portfolio_id, ticker.upper()))
+            """,
+                (current_price, portfolio_id, ticker.upper()),
+            )
 
             if cursor.rowcount > 0:
                 # Log price update
-                self._log_transaction(portfolio_id, ticker.upper(), "UPDATE_PRICE",
-                                    {"current_price": old_price},
-                                    {"current_price": current_price})
+                self._log_transaction(
+                    portfolio_id,
+                    ticker.upper(),
+                    "UPDATE_PRICE",
+                    {"current_price": old_price},
+                    {"current_price": current_price},
+                )
 
             conn.commit()
             return cursor.rowcount > 0
 
-    def _log_transaction(self, portfolio_id: str, ticker: str, transaction_type: str,
-                        old_value: dict = None, new_value: dict = None, notes: str = ""):
+    def _log_transaction(
+        self,
+        portfolio_id: str,
+        ticker: str,
+        transaction_type: str,
+        old_value: dict = None,
+        new_value: dict = None,
+        notes: str = "",
+    ):
         """Log a portfolio transaction"""
         transaction_id = str(uuid.uuid4())
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO portfolio_transactions
                 (id, portfolio_id, ticker, transaction_type, old_value, new_value, notes)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (transaction_id, portfolio_id, ticker, transaction_type,
-                  json.dumps(old_value) if old_value else None,
-                  json.dumps(new_value) if new_value else None,
-                  notes))
+            """,
+                (
+                    transaction_id,
+                    portfolio_id,
+                    ticker,
+                    transaction_type,
+                    json.dumps(old_value) if old_value else None,
+                    json.dumps(new_value) if new_value else None,
+                    notes,
+                ),
+            )
             conn.commit()
 
     def get_tickers(self, portfolio_id: str) -> List[Dict[str, Any]]:
         """Get all tickers in a portfolio"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM portfolio_tickers
                 WHERE portfolio_id = ?
                 ORDER BY ticker
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
-    def update(self, portfolio_id: str, name: str = None, description: str = None) -> bool:
+    def update(
+        self, portfolio_id: str, name: str = None, description: str = None
+    ) -> bool:
         """Update portfolio name and/or description"""
         if name is None and description is None:
             return False
@@ -578,26 +739,39 @@ class Portfolio:
             cursor = conn.cursor()
 
             # First delete all tickers in the portfolio
-            cursor.execute('DELETE FROM portfolio_tickers WHERE portfolio_id = ?', (portfolio_id,))
+            cursor.execute(
+                "DELETE FROM portfolio_tickers WHERE portfolio_id = ?", (portfolio_id,)
+            )
 
             # Then delete the portfolio itself
-            cursor.execute('DELETE FROM portfolios WHERE id = ?', (portfolio_id,))
+            cursor.execute("DELETE FROM portfolios WHERE id = ?", (portfolio_id,))
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_ticker_price(self, portfolio_id: str, ticker: str, current_price: float) -> bool:
+    def update_ticker_price(
+        self, portfolio_id: str, ticker: str, current_price: float
+    ) -> bool:
         """Update the current price for a ticker in portfolio"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE portfolio_tickers
                 SET current_price = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE portfolio_id = ? AND ticker = ?
-            ''', (current_price, portfolio_id, ticker.upper()))
+            """,
+                (current_price, portfolio_id, ticker.upper()),
+            )
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_ticker(self, portfolio_id: str, ticker: str, quantity: float = None, avg_cost: float = None) -> bool:
+    def update_ticker(
+        self,
+        portfolio_id: str,
+        ticker: str,
+        quantity: float = None,
+        avg_cost: float = None,
+    ) -> bool:
         """Update ticker quantity and/or average cost"""
         if quantity is None and avg_cost is None:
             return False
@@ -631,7 +805,7 @@ class Portfolio:
             cursor = conn.cursor()
 
             # Get basic portfolio info
-            cursor.execute('SELECT * FROM portfolios WHERE id = ?', (portfolio_id,))
+            cursor.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,))
             portfolio = cursor.fetchone()
 
             if not portfolio:
@@ -640,7 +814,8 @@ class Portfolio:
             portfolio = dict(portfolio)
 
             # Get tickers with latest prices and analysis
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     pt.ticker,
                     pt.quantity,
@@ -654,7 +829,9 @@ class Portfolio:
                 FROM portfolio_tickers pt
                 WHERE pt.portfolio_id = ?
                 ORDER BY pt.ticker
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             tickers_data = []
             total_current_value = 0
@@ -665,37 +842,43 @@ class Portfolio:
                 ticker_info = dict(row)
                 tickers_data.append(ticker_info)
 
-                if ticker_info['current_value']:
-                    total_current_value += ticker_info['current_value']
-                if ticker_info['total_cost']:
-                    total_cost += ticker_info['total_cost']
-                if ticker_info['unrealized_pnl']:
-                    total_unrealized_pnl += ticker_info['unrealized_pnl']
+                if ticker_info["current_value"]:
+                    total_current_value += ticker_info["current_value"]
+                if ticker_info["total_cost"]:
+                    total_cost += ticker_info["total_cost"]
+                if ticker_info["unrealized_pnl"]:
+                    total_unrealized_pnl += ticker_info["unrealized_pnl"]
 
             # Get latest analysis for each ticker
             for ticker_info in tickers_data:
-                ticker = ticker_info['ticker']
-                cursor.execute('''
+                ticker = ticker_info["ticker"]
+                cursor.execute(
+                    """
                     SELECT recommendation, confidence_level, risk_level, created_at
                     FROM analysis_results
                     WHERE ticker = ? AND (portfolio_id = ? OR portfolio_id IS NULL)
                     ORDER BY created_at DESC
                     LIMIT 1
-                ''', (ticker, portfolio_id))
+                """,
+                    (ticker, portfolio_id),
+                )
 
                 analysis = cursor.fetchone()
                 if analysis:
-                    ticker_info['analysis'] = dict(analysis)
+                    ticker_info["analysis"] = dict(analysis)
                 else:
-                    ticker_info['analysis'] = None
+                    ticker_info["analysis"] = None
 
             # Calculate portfolio-level metrics
             portfolio_percentage_change = 0
             if total_cost > 0:
-                portfolio_percentage_change = ((total_current_value - total_cost) / total_cost) * 100
+                portfolio_percentage_change = (
+                    (total_current_value - total_cost) / total_cost
+                ) * 100
 
             # Get portfolio changes (recently added/removed tickers)
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     ticker,
                     transaction_type,
@@ -708,20 +891,23 @@ class Portfolio:
                 AND created_at >= datetime('now', '-30 days')
                 ORDER BY created_at DESC
                 LIMIT 20
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             recent_changes = []
             for row in cursor.fetchall():
                 change = dict(row)
                 # Parse JSON values
-                if change['old_value']:
-                    change['old_value'] = json.loads(change['old_value'])
-                if change['new_value']:
-                    change['new_value'] = json.loads(change['new_value'])
+                if change["old_value"]:
+                    change["old_value"] = json.loads(change["old_value"])
+                if change["new_value"]:
+                    change["new_value"] = json.loads(change["new_value"])
                 recent_changes.append(change)
 
             # Get accuracy metrics for the portfolio
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     AVG(accuracy_score) as avg_accuracy,
                     COUNT(*) as total_predictions,
@@ -729,28 +915,36 @@ class Portfolio:
                     MAX(accuracy_score) as max_accuracy
                 FROM comparison_results
                 WHERE portfolio_id = ?
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             accuracy_row = cursor.fetchone()
-            accuracy_metrics = dict(accuracy_row) if accuracy_row and accuracy_row['total_predictions'] > 0 else {
-                'avg_accuracy': None,
-                'total_predictions': 0,
-                'min_accuracy': None,
-                'max_accuracy': None
-            }
+            accuracy_metrics = (
+                dict(accuracy_row)
+                if accuracy_row and accuracy_row["total_predictions"] > 0
+                else {
+                    "avg_accuracy": None,
+                    "total_predictions": 0,
+                    "min_accuracy": None,
+                    "max_accuracy": None,
+                }
+            )
 
             return {
-                'portfolio': portfolio,
-                'tickers': tickers_data,
-                'summary': {
-                    'total_tickers': len(tickers_data),
-                    'total_current_value': round(total_current_value, 2),
-                    'total_cost': round(total_cost, 2),
-                    'total_unrealized_pnl': round(total_unrealized_pnl, 2),
-                    'portfolio_percentage_change': round(portfolio_percentage_change, 2)
+                "portfolio": portfolio,
+                "tickers": tickers_data,
+                "summary": {
+                    "total_tickers": len(tickers_data),
+                    "total_current_value": round(total_current_value, 2),
+                    "total_cost": round(total_cost, 2),
+                    "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+                    "portfolio_percentage_change": round(
+                        portfolio_percentage_change, 2
+                    ),
                 },
-                'accuracy_metrics': accuracy_metrics,
-                'recent_changes': recent_changes
+                "accuracy_metrics": accuracy_metrics,
+                "recent_changes": recent_changes,
             }
 
     def get_portfolio_analytics(self, portfolio_id: str) -> Dict[str, Any]:
@@ -759,7 +953,7 @@ class Portfolio:
             cursor = conn.cursor()
 
             # Get portfolio basic information
-            cursor.execute('SELECT * FROM portfolios WHERE id = ?', (portfolio_id,))
+            cursor.execute("SELECT * FROM portfolios WHERE id = ?", (portfolio_id,))
             portfolio = cursor.fetchone()
             if not portfolio:
                 return {"error": "Portfolio not found"}
@@ -767,7 +961,8 @@ class Portfolio:
             portfolio = dict(portfolio)
 
             # Get portfolio tickers with their values
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     ticker,
                     quantity,
@@ -779,33 +974,40 @@ class Portfolio:
                 FROM portfolio_tickers
                 WHERE portfolio_id = ?
                 AND quantity > 0
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             holdings = [dict(row) for row in cursor.fetchall()]
 
             # Calculate basic portfolio metrics
-            total_current_value = sum(h.get('current_value', 0) or 0 for h in holdings)
-            total_cost_basis = sum(h.get('cost_basis', 0) or 0 for h in holdings)
-            total_unrealized_pnl = sum(h.get('unrealized_pnl', 0) or 0 for h in holdings)
+            total_current_value = sum(h.get("current_value", 0) or 0 for h in holdings)
+            total_cost_basis = sum(h.get("cost_basis", 0) or 0 for h in holdings)
+            total_unrealized_pnl = sum(
+                h.get("unrealized_pnl", 0) or 0 for h in holdings
+            )
 
             # Portfolio composition analysis
             composition = []
             if total_current_value > 0:
                 for holding in holdings:
-                    current_value = holding.get('current_value', 0) or 0
+                    current_value = holding.get("current_value", 0) or 0
                     if current_value > 0:
-                        composition.append({
-                            'ticker': holding['ticker'],
-                            'weight': (current_value / total_current_value) * 100,
-                            'value': current_value,
-                            'quantity': holding.get('quantity', 0)
-                        })
+                        composition.append(
+                            {
+                                "ticker": holding["ticker"],
+                                "weight": (current_value / total_current_value) * 100,
+                                "value": current_value,
+                                "quantity": holding.get("quantity", 0),
+                            }
+                        )
 
                 # Sort by weight descending
-                composition.sort(key=lambda x: x['weight'], reverse=True)
+                composition.sort(key=lambda x: x["weight"], reverse=True)
 
             # Risk distribution analysis (try to get from analysis results, fall back to basic metrics)
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     ar.risk_level,
                     COUNT(*) as count,
@@ -819,12 +1021,15 @@ class Portfolio:
                     ORDER BY ar2.created_at DESC LIMIT 1
                 )
                 GROUP BY ar.risk_level
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             risk_distribution = [dict(row) for row in cursor.fetchall()]
 
             # Recommendation distribution
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     ar.recommendation,
                     COUNT(*) as count,
@@ -838,12 +1043,15 @@ class Portfolio:
                     ORDER BY ar2.created_at DESC LIMIT 1
                 )
                 GROUP BY ar.recommendation
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             recommendation_distribution = [dict(row) for row in cursor.fetchall()]
 
             # Performance trends over time
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT
                     DATE(ch.executed_at) as date,
                     COUNT(*) as analysis_count,
@@ -855,58 +1063,79 @@ class Portfolio:
                 GROUP BY DATE(ch.executed_at)
                 ORDER BY date DESC
                 LIMIT 30
-            ''', (portfolio_id,))
+            """,
+                (portfolio_id,),
+            )
 
             performance_trends = [dict(row) for row in cursor.fetchall()]
 
             # Calculate diversification metrics
             diversification_metrics = {
-                'total_holdings': len(holdings),
-                'concentration_risk': 'High' if composition and composition[0]['weight'] > 50 else 'Medium' if composition and composition[0]['weight'] > 30 else 'Low',
-                'top_3_concentration': sum(h['weight'] for h in composition[:3]) if len(composition) >= 3 else (sum(h['weight'] for h in composition) if composition else 0)
+                "total_holdings": len(holdings),
+                "concentration_risk": "High"
+                if composition and composition[0]["weight"] > 50
+                else "Medium"
+                if composition and composition[0]["weight"] > 30
+                else "Low",
+                "top_3_concentration": sum(h["weight"] for h in composition[:3])
+                if len(composition) >= 3
+                else (sum(h["weight"] for h in composition) if composition else 0),
             }
 
             # Performance metrics
-            portfolio_return = ((total_current_value - total_cost_basis) / total_cost_basis * 100) if total_cost_basis > 0 else 0
+            portfolio_return = (
+                ((total_current_value - total_cost_basis) / total_cost_basis * 100)
+                if total_cost_basis > 0
+                else 0
+            )
             performance_metrics = {
-                'total_return_pct': round(portfolio_return, 2),
-                'total_value': round(total_current_value, 2),
-                'total_cost_basis': round(total_cost_basis, 2),
-                'unrealized_pnl': round(total_unrealized_pnl, 2),
-                'largest_position': composition[0] if composition else None,
-                'smallest_position': composition[-1] if composition else None
+                "total_return_pct": round(portfolio_return, 2),
+                "total_value": round(total_current_value, 2),
+                "total_cost_basis": round(total_cost_basis, 2),
+                "unrealized_pnl": round(total_unrealized_pnl, 2),
+                "largest_position": composition[0] if composition else None,
+                "smallest_position": composition[-1] if composition else None,
             }
 
             # Basic risk assessment based on portfolio characteristics
-            risk_assessment = 'Low'
-            if diversification_metrics['concentration_risk'] == 'High':
-                risk_assessment = 'High'
+            risk_assessment = "Low"
+            if diversification_metrics["concentration_risk"] == "High":
+                risk_assessment = "High"
             elif len(holdings) < 5:
-                risk_assessment = 'Medium-High'
-            elif diversification_metrics['top_3_concentration'] > 70:
-                risk_assessment = 'Medium'
+                risk_assessment = "Medium-High"
+            elif diversification_metrics["top_3_concentration"] > 70:
+                risk_assessment = "Medium"
 
             return {
-                'portfolio_summary': {
-                    'name': portfolio['name'],
-                    'total_holdings': len(holdings),
-                    'total_value': round(total_current_value, 2),
-                    'total_return_pct': round(portfolio_return, 2)
+                "portfolio_summary": {
+                    "name": portfolio["name"],
+                    "total_holdings": len(holdings),
+                    "total_value": round(total_current_value, 2),
+                    "total_return_pct": round(portfolio_return, 2),
                 },
-                'composition': composition[:10],  # Top 10 holdings
-                'diversification_metrics': diversification_metrics,
-                'performance_metrics': performance_metrics,
-                'risk_assessment': {
-                    'overall_risk': risk_assessment,
-                    'concentration_risk': diversification_metrics['concentration_risk'],
-                    'diversification_score': max(0, min(100, (100 - diversification_metrics['top_3_concentration']) if diversification_metrics['top_3_concentration'] > 0 else 50))
+                "composition": composition[:10],  # Top 10 holdings
+                "diversification_metrics": diversification_metrics,
+                "performance_metrics": performance_metrics,
+                "risk_assessment": {
+                    "overall_risk": risk_assessment,
+                    "concentration_risk": diversification_metrics["concentration_risk"],
+                    "diversification_score": max(
+                        0,
+                        min(
+                            100,
+                            (100 - diversification_metrics["top_3_concentration"])
+                            if diversification_metrics["top_3_concentration"] > 0
+                            else 50,
+                        ),
+                    ),
                 },
-                'analysis_based_metrics': {
-                    'risk_distribution': risk_distribution,
-                    'recommendation_distribution': recommendation_distribution,
-                    'performance_trends': performance_trends,
-                    'has_analysis_data': len(risk_distribution) > 0 or len(recommendation_distribution) > 0
-                }
+                "analysis_based_metrics": {
+                    "risk_distribution": risk_distribution,
+                    "recommendation_distribution": recommendation_distribution,
+                    "performance_trends": performance_trends,
+                    "has_analysis_data": len(risk_distribution) > 0
+                    or len(recommendation_distribution) > 0,
+                },
             }
 
 
@@ -916,20 +1145,38 @@ class AnalysisResult:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
-    def save(self, portfolio_id: Optional[str], ticker: str, analysis_type: str,
-             analysis_data: Dict[str, Any], recommendation: str = "",
-             confidence_level: str = "", risk_level: str = "") -> str:
+    def save(
+        self,
+        portfolio_id: Optional[str],
+        ticker: str,
+        analysis_type: str,
+        analysis_data: Dict[str, Any],
+        recommendation: str = "",
+        confidence_level: str = "",
+        risk_level: str = "",
+    ) -> str:
         """Save analysis results"""
         result_id = str(uuid.uuid4())
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO analysis_results
                 (id, portfolio_id, ticker, analysis_type, analysis_data,
                  recommendation, confidence_level, risk_level)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (result_id, portfolio_id, ticker.upper(), analysis_type,
-                  json.dumps(analysis_data), recommendation, confidence_level, risk_level))
+            """,
+                (
+                    result_id,
+                    portfolio_id,
+                    ticker.upper(),
+                    analysis_type,
+                    json.dumps(analysis_data),
+                    recommendation,
+                    confidence_level,
+                    risk_level,
+                ),
+            )
             conn.commit()
         return result_id
 
@@ -937,33 +1184,41 @@ class AnalysisResult:
         """Get analysis results for a ticker"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM analysis_results
                 WHERE ticker = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            ''', (ticker.upper(), limit))
+            """,
+                (ticker.upper(), limit),
+            )
             results = []
             for row in cursor.fetchall():
                 result = dict(row)
-                result['analysis_data'] = json.loads(result['analysis_data'])
+                result["analysis_data"] = json.loads(result["analysis_data"])
                 results.append(result)
             return results
 
-    def get_by_portfolio(self, portfolio_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_by_portfolio(
+        self, portfolio_id: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
         """Get analysis results for a portfolio"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM analysis_results
                 WHERE portfolio_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            ''', (portfolio_id, limit))
+            """,
+                (portfolio_id, limit),
+            )
             results = []
             for row in cursor.fetchall():
                 result = dict(row)
-                result['analysis_data'] = json.loads(result['analysis_data'])
+                result["analysis_data"] = json.loads(result["analysis_data"])
                 results.append(result)
             return results
 
@@ -971,15 +1226,18 @@ class AnalysisResult:
         """Get all analysis results"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM analysis_results
                 ORDER BY created_at DESC
                 LIMIT ?
-            ''', (limit,))
+            """,
+                (limit,),
+            )
             results = []
             for row in cursor.fetchall():
                 result = dict(row)
-                result['analysis_data'] = json.loads(result['analysis_data'])
+                result["analysis_data"] = json.loads(result["analysis_data"])
                 results.append(result)
             return results
 
@@ -989,7 +1247,9 @@ class AnalysisResult:
             cursor = conn.cursor()
 
             # Get current analysis data
-            cursor.execute('SELECT * FROM analysis_results WHERE id = ?', (analysis_id,))
+            cursor.execute(
+                "SELECT * FROM analysis_results WHERE id = ?", (analysis_id,)
+            )
             current = cursor.fetchone()
 
             if not current:
@@ -997,10 +1257,13 @@ class AnalysisResult:
 
             # Add to history
             history_id = str(uuid.uuid4())
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO analysis_history (id, analysis_id, version, analysis_data, notes)
                 VALUES (?, ?, 1, ?, ?)
-            ''', (history_id, analysis_id, current['analysis_data'], notes))
+            """,
+                (history_id, analysis_id, current["analysis_data"], notes),
+            )
 
             conn.commit()
             return True
@@ -1012,19 +1275,35 @@ class CommandHistory:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
-    def log_command(self, command: str, parameters: Dict[str, Any] = None,
-                   execution_time: float = 0.0, status: str = "SUCCESS",
-                   output: str = "", error_message: str = "") -> str:
+    def log_command(
+        self,
+        command: str,
+        parameters: Dict[str, Any] = None,
+        execution_time: float = 0.0,
+        status: str = "SUCCESS",
+        output: str = "",
+        error_message: str = "",
+    ) -> str:
         """Log a command execution"""
         command_id = str(uuid.uuid4())
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO command_history
                 (id, command, parameters, execution_time, status, output, error_message)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (command_id, command, json.dumps(parameters) if parameters else None,
-                  execution_time, status, output, error_message))
+            """,
+                (
+                    command_id,
+                    command,
+                    json.dumps(parameters) if parameters else None,
+                    execution_time,
+                    status,
+                    output,
+                    error_message,
+                ),
+            )
             conn.commit()
         return command_id
 
@@ -1032,29 +1311,41 @@ class CommandHistory:
         """Get recent command history"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM command_history
                 ORDER BY executed_at DESC
                 LIMIT ?
-            ''', (limit,))
+            """,
+                (limit,),
+            )
             results = []
             for row in cursor.fetchall():
                 result = dict(row)
-                if result['parameters']:
-                    result['parameters'] = json.loads(result['parameters'])
+                if result["parameters"]:
+                    result["parameters"] = json.loads(result["parameters"])
                 results.append(result)
             return results
 
-    def update_status(self, command_id: str, status: str, execution_time: float = 0.0,
-                     output: str = "", error_message: str = "") -> bool:
+    def update_status(
+        self,
+        command_id: str,
+        status: str,
+        execution_time: float = 0.0,
+        output: str = "",
+        error_message: str = "",
+    ) -> bool:
         """Update command execution status"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE command_history
                 SET status = ?, execution_time = ?, output = ?, error_message = ?
                 WHERE id = ?
-            ''', (status, execution_time, output, error_message, command_id))
+            """,
+                (status, execution_time, output, error_message, command_id),
+            )
             conn.commit()
             return cursor.rowcount > 0
 
@@ -1065,23 +1356,40 @@ class ComparisonResult:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
-    def save_comparison(self, portfolio_id: Optional[str], ticker: str,
-                       predicted_data: Dict[str, Any], actual_data: Dict[str, Any],
-                       comparison_metrics: Dict[str, Any], accuracy_score: float,
-                       prediction_date: datetime, actual_date: datetime) -> str:
+    def save_comparison(
+        self,
+        portfolio_id: Optional[str],
+        ticker: str,
+        predicted_data: Dict[str, Any],
+        actual_data: Dict[str, Any],
+        comparison_metrics: Dict[str, Any],
+        accuracy_score: float,
+        prediction_date: datetime,
+        actual_date: datetime,
+    ) -> str:
         """Save comparison results"""
         comparison_id = str(uuid.uuid4())
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 INSERT INTO comparison_results
                 (id, portfolio_id, ticker, predicted_data, actual_data,
                  comparison_metrics, accuracy_score, prediction_date, actual_date)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (comparison_id, portfolio_id, ticker.upper(),
-                  json.dumps(predicted_data), json.dumps(actual_data),
-                  json.dumps(comparison_metrics), accuracy_score,
-                  prediction_date, actual_date))
+            """,
+                (
+                    comparison_id,
+                    portfolio_id,
+                    ticker.upper(),
+                    json.dumps(predicted_data),
+                    json.dumps(actual_data),
+                    json.dumps(comparison_metrics),
+                    accuracy_score,
+                    prediction_date,
+                    actual_date,
+                ),
+            )
             conn.commit()
         return comparison_id
 
@@ -1089,22 +1397,27 @@ class ComparisonResult:
         """Get comparison results for a ticker"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM comparison_results
                 WHERE ticker = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            ''', (ticker.upper(), limit))
+            """,
+                (ticker.upper(), limit),
+            )
             results = []
             for row in cursor.fetchall():
                 result = dict(row)
-                result['predicted_data'] = json.loads(result['predicted_data'])
-                result['actual_data'] = json.loads(result['actual_data'])
-                result['comparison_metrics'] = json.loads(result['comparison_metrics'])
+                result["predicted_data"] = json.loads(result["predicted_data"])
+                result["actual_data"] = json.loads(result["actual_data"])
+                result["comparison_metrics"] = json.loads(result["comparison_metrics"])
                 results.append(result)
             return results
 
-    def get_accuracy_trends(self, ticker: str = None, portfolio_id: str = None) -> Dict[str, Any]:
+    def get_accuracy_trends(
+        self, ticker: str = None, portfolio_id: str = None
+    ) -> Dict[str, Any]:
         """Get accuracy trends for analysis refinement"""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
@@ -1120,7 +1433,8 @@ class ComparisonResult:
                 where_clause += " AND portfolio_id = ?"
                 params.append(portfolio_id)
 
-            cursor.execute(f'''
+            cursor.execute(
+                f"""
                 SELECT
                     AVG(accuracy_score) as avg_accuracy,
                     COUNT(*) as total_comparisons,
@@ -1131,7 +1445,9 @@ class ComparisonResult:
                 {where_clause}
                 GROUP BY ticker
                 ORDER BY avg_accuracy DESC
-            ''', params)
+            """,
+                params,
+            )
 
             return [dict(row) for row in cursor.fetchall()]
 
@@ -1167,10 +1483,14 @@ class TickerPrediction:
             return "DOWN"
         return "FLAT"
 
-    def save_predictions(self, ticker: str, entry_price: float,
-                        predictions: Dict[str, Dict[str, Any]],
-                        run_id: Optional[str] = None,
-                        provenance: Optional[Dict[str, Any]] = None) -> List[str]:
+    def save_predictions(
+        self,
+        ticker: str,
+        entry_price: float,
+        predictions: Dict[str, Dict[str, Any]],
+        run_id: Optional[str] = None,
+        provenance: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
         """Persist one row per tracked horizon for this analysis run."""
         ticker = ticker.upper()
         provenance = provenance or {}
@@ -1183,64 +1503,100 @@ class TickerPrediction:
                     continue
                 prediction_id = str(uuid.uuid4())
                 predicted_change_pct = pred["predicted_change_pct"]
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO ticker_predictions
                     (id, ticker, horizon, run_id, entry_price, predicted_price,
                      predicted_change_pct, predicted_trend, confidence, target_date,
                      decision_status, evidence_tags, data_quality, empirical_validation,
                      trade_plan_validation, policy_version)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    prediction_id, ticker, horizon, run_id, entry_price,
-                    pred["predicted_price"], predicted_change_pct,
-                    self.classify_trend(predicted_change_pct), pred["confidence"],
-                    pred["target_date"],
-                    provenance.get('decision_status'),
-                    json.dumps(provenance.get('evidence_tags', [])),
-                    json.dumps(provenance.get('data_quality', {})),
-                    json.dumps(provenance.get('empirical_validation', {})),
-                    json.dumps(provenance.get('trade_plan_validation', {})),
-                    provenance.get('policy_version'),
-                ))
+                """,
+                    (
+                        prediction_id,
+                        ticker,
+                        horizon,
+                        run_id,
+                        entry_price,
+                        pred["predicted_price"],
+                        predicted_change_pct,
+                        self.classify_trend(predicted_change_pct),
+                        pred["confidence"],
+                        pred["target_date"],
+                        provenance.get("decision_status"),
+                        json.dumps(provenance.get("evidence_tags", [])),
+                        json.dumps(provenance.get("data_quality", {})),
+                        json.dumps(provenance.get("empirical_validation", {})),
+                        json.dumps(provenance.get("trade_plan_validation", {})),
+                        provenance.get("policy_version"),
+                    ),
+                )
                 ids.append(prediction_id)
             conn.commit()
         return ids
 
-    def get_due_predictions(self, ticker: str, as_of: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_due_predictions(
+        self, ticker: str, as_of: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Fetch unresolved predictions whose target date has already passed."""
-        as_of = as_of or datetime.now().strftime('%Y-%m-%d')
+        as_of = as_of or datetime.now().strftime("%Y-%m-%d")
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM ticker_predictions
                 WHERE ticker = ? AND resolved = 0 AND target_date <= ?
                 ORDER BY target_date ASC
-            ''', (ticker.upper(), as_of))
+            """,
+                (ticker.upper(), as_of),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
-    def resolve_prediction(self, prediction_id: str, actual_price: float, entry_price: float,
-                          predicted_trend: str, horizon: str) -> Dict[str, Any]:
+    def resolve_prediction(
+        self,
+        prediction_id: str,
+        actual_price: float,
+        entry_price: float,
+        predicted_trend: str,
+        horizon: str,
+    ) -> Dict[str, Any]:
         """Score a due prediction against the observed actual price."""
-        actual_change_pct = ((actual_price - entry_price) / entry_price) * 100 if entry_price else 0.0
+        actual_change_pct = (
+            ((actual_price - entry_price) / entry_price) * 100 if entry_price else 0.0
+        )
         actual_trend = self.classify_trend(actual_change_pct)
 
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT predicted_change_pct FROM ticker_predictions WHERE id = ?', (prediction_id,))
+            cursor.execute(
+                "SELECT predicted_change_pct FROM ticker_predictions WHERE id = ?",
+                (prediction_id,),
+            )
             row = cursor.fetchone()
-            predicted_change_pct = row['predicted_change_pct'] if row else 0.0
+            predicted_change_pct = row["predicted_change_pct"] if row else 0.0
 
             tolerance = self.TOLERANCE_BY_HORIZON.get(horizon, 10.0)
             price_error_pct = abs(actual_change_pct - predicted_change_pct)
-            accurate = (actual_trend == predicted_trend) and (price_error_pct <= tolerance)
+            accurate = (actual_trend == predicted_trend) and (
+                price_error_pct <= tolerance
+            )
             accuracy_score = 1 if accurate else -1
 
-            cursor.execute('''
+            cursor.execute(
+                """
                 UPDATE ticker_predictions
                 SET resolved = 1, actual_price = ?, actual_change_pct = ?, actual_trend = ?,
                     accuracy_score = ?, resolved_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            ''', (actual_price, actual_change_pct, actual_trend, accuracy_score, prediction_id))
+            """,
+                (
+                    actual_price,
+                    actual_change_pct,
+                    actual_trend,
+                    accuracy_score,
+                    prediction_id,
+                ),
+            )
             conn.commit()
 
         return {
@@ -1257,17 +1613,21 @@ class TickerPrediction:
         """Fetch recent predictions (resolved or pending) for a ticker."""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM ticker_predictions WHERE ticker = ?
                 ORDER BY created_at DESC LIMIT ?
-            ''', (ticker.upper(), limit))
+            """,
+                (ticker.upper(), limit),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_confidence_summary(self, ticker: str) -> Dict[str, Any]:
         """Aggregate resolved prediction scores into a confidence indicator per horizon."""
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT horizon,
                        COUNT(*) as resolved_count,
                        SUM(CASE WHEN accuracy_score = 1 THEN 1 ELSE 0 END) as correct_count,
@@ -1275,7 +1635,9 @@ class TickerPrediction:
                 FROM ticker_predictions
                 WHERE ticker = ? AND resolved = 1
                 GROUP BY horizon
-            ''', (ticker.upper(),))
+            """,
+                (ticker.upper(),),
+            )
 
             by_horizon: Dict[str, Any] = {}
             total_score = 0
@@ -1283,28 +1645,37 @@ class TickerPrediction:
             total_correct = 0
             for row in cursor.fetchall():
                 r = dict(row)
-                accuracy_rate = (r['correct_count'] / r['resolved_count']) if r['resolved_count'] else None
-                by_horizon[r['horizon']] = {
-                    "resolved_count": r['resolved_count'],
-                    "correct_count": r['correct_count'],
-                    "score": r['score_sum'],
+                accuracy_rate = (
+                    (r["correct_count"] / r["resolved_count"])
+                    if r["resolved_count"]
+                    else None
+                )
+                by_horizon[r["horizon"]] = {
+                    "resolved_count": r["resolved_count"],
+                    "correct_count": r["correct_count"],
+                    "score": r["score_sum"],
                     "accuracy_rate": accuracy_rate,
                 }
-                total_score += r['score_sum'] or 0
-                total_resolved += r['resolved_count']
-                total_correct += r['correct_count']
+                total_score += r["score_sum"] or 0
+                total_resolved += r["resolved_count"]
+                total_correct += r["correct_count"]
 
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT COUNT(*) as pending FROM ticker_predictions WHERE ticker = ? AND resolved = 0
-            ''', (ticker.upper(),))
-            pending = cursor.fetchone()['pending']
+            """,
+                (ticker.upper(),),
+            )
+            pending = cursor.fetchone()["pending"]
 
         return {
             "ticker": ticker.upper(),
             "confidence_score": total_score,
             "resolved_count": total_resolved,
             "correct_count": total_correct,
-            "overall_accuracy_rate": (total_correct / total_resolved) if total_resolved else None,
+            "overall_accuracy_rate": (total_correct / total_resolved)
+            if total_resolved
+            else None,
             "pending_count": pending,
             "by_horizon": by_horizon,
         }
@@ -1320,7 +1691,7 @@ class SuggestionCache:
     """
 
     DEFAULT_TTL_HOURS = 24.0
-    TIMESTAMP_FORMAT = '%Y-%m-%d %H:%M:%S'
+    TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
@@ -1331,8 +1702,8 @@ class SuggestionCache:
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'DELETE FROM suggestion_cache WHERE expires_at <= ?',
-                (as_of.strftime(self.TIMESTAMP_FORMAT),)
+                "DELETE FROM suggestion_cache WHERE expires_at <= ?",
+                (as_of.strftime(self.TIMESTAMP_FORMAT),),
             )
             deleted = cursor.rowcount
             conn.commit()
@@ -1343,18 +1714,23 @@ class SuggestionCache:
         as_of = as_of or datetime.utcnow()
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            cursor.execute(
+                """
                 SELECT * FROM suggestion_cache
                 WHERE expires_at > ?
                 ORDER BY cached_at DESC
-            ''', (as_of.strftime(self.TIMESTAMP_FORMAT),))
+            """,
+                (as_of.strftime(self.TIMESTAMP_FORMAT),),
+            )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_active_tickers(self, as_of: Optional[datetime] = None) -> set:
         """Set of tickers currently within their 24h suggestion cooldown."""
-        return {row['ticker'] for row in self.get_active(as_of=as_of)}
+        return {row["ticker"] for row in self.get_active(as_of=as_of)}
 
-    def add_suggestions(self, suggestions: List[Any], ttl_hours: float = DEFAULT_TTL_HOURS) -> int:
+    def add_suggestions(
+        self, suggestions: List[Any], ttl_hours: float = DEFAULT_TTL_HOURS
+    ) -> int:
         """Cache newly-suggested tickers, skipping any already actively cached."""
         if not suggestions:
             return 0
@@ -1368,17 +1744,27 @@ class SuggestionCache:
                 ticker = item.symbol.upper()
                 if ticker in active_tickers:
                     continue
-                cursor.execute('''
+                cursor.execute(
+                    """
                     INSERT INTO suggestion_cache
                     (id, ticker, score, expected_7d_return, momentum, volume_signal,
                      analyst_bias, risk_flag, reason, cached_at, expires_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    str(uuid.uuid4()), ticker, item.score, item.expected_7d_return,
-                    item.momentum, item.volume_signal, item.analyst_bias,
-                    item.risk_flag, item.reason,
-                    now.strftime(self.TIMESTAMP_FORMAT), expires_at.strftime(self.TIMESTAMP_FORMAT),
-                ))
+                """,
+                    (
+                        str(uuid.uuid4()),
+                        ticker,
+                        item.score,
+                        item.expected_7d_return,
+                        item.momentum,
+                        item.volume_signal,
+                        item.analyst_bias,
+                        item.risk_flag,
+                        item.reason,
+                        now.strftime(self.TIMESTAMP_FORMAT),
+                        expires_at.strftime(self.TIMESTAMP_FORMAT),
+                    ),
+                )
                 active_tickers.add(ticker)
                 inserted += 1
             conn.commit()
