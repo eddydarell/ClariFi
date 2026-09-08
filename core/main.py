@@ -5128,8 +5128,38 @@ def main():
             from core.intraday_agent import AutonomousIntradayAgent
             from core.event_emitter import EventBus
             from core.decision_logger import DecisionLogger
+            from core.finnhub_provider import (
+                FinnhubQuoteProvider,
+                FinnhubMarketStatusProvider,
+            )
+            from core.finnhub_websocket import FinnhubWebsocketClient
 
-            screener = IntradayScreener()
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv()
+            except Exception:
+                pass
+
+            finnhub_key = os.getenv("FINNHUB_API_KEY")
+            if finnhub_key:
+                quote_provider = FinnhubQuoteProvider(api_key=finnhub_key)
+                market_status_provider = FinnhubMarketStatusProvider(
+                    api_key=finnhub_key
+                )
+                websocket_client = FinnhubWebsocketClient(api_key=finnhub_key)
+                print(
+                    f"{Fore.CYAN}📡 Finnhub realtime: websocket tick stream + market-status EOD (exchange=US){Style.RESET_ALL}"
+                )
+            else:
+                quote_provider = None
+                market_status_provider = None
+                websocket_client = None
+                print(
+                    f"{Fore.YELLOW}ℹ️  FINNHUB_API_KEY not set — using delayed fallback quotes and local-clock EOD.{Style.RESET_ALL}"
+                )
+
+            screener = IntradayScreener(quote_provider=quote_provider)
             strategy_gen = IntradayStrategyGenerator(screener)
             simulator = IntradaySimulator(initial_budget=args.budget)
             agent = (
@@ -5206,6 +5236,7 @@ def main():
                         )
 
                 monitor = IntradayLoopMonitor(
+                    quote_provider=quote_provider,
                     simulator=simulator,
                     screener=screener,
                     strategy_gen=strategy_gen,
@@ -5214,6 +5245,8 @@ def main():
                     enable_shadow_trading=args.shadow,
                     event_bus=event_bus,
                     decision_logger=decision_logger,
+                    websocket_client=websocket_client,
+                    market_status_provider=market_status_provider,
                 )
                 monitor.add_stocks(target_tickers, profile=profile_mode)
                 monitor.run_loop(max_ticks=args.ticks)

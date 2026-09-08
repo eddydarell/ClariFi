@@ -64,6 +64,8 @@ from event_emitter import (
     EVENT_SESSION_ENDED,
 )
 from decision_logger import DecisionLogger
+from finnhub_provider import FinnhubMarketStatusProvider
+from finnhub_websocket import FinnhubWebsocketClient
 
 
 @dataclass
@@ -103,6 +105,9 @@ class IntradayLoopMonitor:
         enable_shadow_trading: bool = True,
         event_bus: Optional[EventBus] = None,
         decision_logger: Optional[DecisionLogger] = None,
+        websocket_client: Optional[FinnhubWebsocketClient] = None,
+        market_status_provider: Optional[FinnhubMarketStatusProvider] = None,
+        ws_max_age_seconds: float = 300.0,
     ):
         self.quote_provider = quote_provider or MarketQuoteProvider()
         self.screener = screener or IntradayScreener(self.quote_provider)
@@ -113,6 +118,9 @@ class IntradayLoopMonitor:
         self.enable_shadow = enable_shadow_trading
         self.event_bus = event_bus or EventBus.get_instance()
         self.decision_logger = decision_logger
+        self.ws_client = websocket_client
+        self.market_status_provider = market_status_provider
+        self.ws_max_age_seconds = ws_max_age_seconds
         self.monitored_stocks: Dict[str, MonitoredStockState] = {}
         self.running = False
         self.tick_count = 0
@@ -140,6 +148,15 @@ class IntradayLoopMonitor:
 
     def add_stocks(self, tickers: List[str], profile: str = "BOTH"):
         """Adds a list of tickers to the continuous monitoring loop."""
+        market = self._market_state()
+        self.market_state = market
+        tradable = market.get("tradable", True)
+        if not tradable:
+            print(
+                f"{Fore.YELLOW}⚠️  {market.get('label', 'MARKET CLOSED')} — "
+                f"monitoring scheduled, but NO positions will be opened.{Style.RESET_ALL}"
+            )
+
         for t in tickers:
             ticker = t.strip().upper()
             report = self.strategy_gen.generate_for_ticker(ticker)
@@ -167,8 +184,9 @@ class IntradayLoopMonitor:
                 active_plan=plan,
             )
 
-            # Auto-open shadow trade if enabled and initially triggered
-            if self.enable_shadow and plan:
+            # Auto-open shadow trade if enabled and initially triggered AND the
+            # market is in the regular session (no entries on closed markets).
+            if self.enable_shadow and plan and tradable:
                 state.shadow_trade = self.simulator.open_paper_trade(plan)
                 if state.shadow_trade:
                     state.state = "ENTERED"
@@ -187,9 +205,145 @@ class IntradayLoopMonitor:
                     )
 
             self.monitored_stocks[ticker] = state
+            if self.ws_client:
+                self.ws_client.subscribe([ticker])
             print(
                 f"{Fore.GREEN}✓ Added {ticker} ({profile}) to Intraday Monitor [Odds Score: {report.intraday_odds_score}/100]{Style.RESET_ALL}"
             )
+
+        if self.ws_client and self.monitored_stocks:
+            self.ws_client.start()
+
+    def _market_state(self) -> Dict[str, Any]:
+        """
+        Normalized market status for trading decisions. Only the ``regular``
+        session (US market) is considered tradable; holidays, weekends and
+        pre/post-market sessions gate entries off. When no market-status
+        provider is configured (or it fails), trading is assumed permissible so
+        the monitor degrades gracefully to the legacy behavior.
+        """
+        if self.market_status_provider:
+            try:
+                status = self.market_status_provider.get_status()
+            except Exception:
+                status = None
+            if status:
+                session = status.get("session")
+                holiday = status.get("holiday")
+                tradable = session == "regular"
+                if holiday:
+                    label = (
+                        f"MARKET CLOSED ({holiday}) — session: {session or 'closed'}"
+                    )
+                elif session in (None, ""):
+                    label = "MARKET CLOSED — session: closed"
+                else:
+                    label = f"MARKET CLOSED for trading — session: {session}"
+                return {
+                    "available": True,
+                    "session": session,
+                    "is_open": status.get("is_open"),
+                    "holiday": holiday,
+                    "tradable": tradable,
+                    "label": label,
+                }
+        return {
+            "available": False,
+            "session": "regular",
+            "is_open": None,
+            "holiday": None,
+            "tradable": True,
+            "label": "MARKET OPEN (provider unavailable — assumed)",
+        }
+
+    def _flatten_open_positions(
+        self, reason: str, market: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Force-close any ENTERED positions because the market is no longer
+        tradable (holiday, closed session, after-hours).
+        """
+        events: List[Dict[str, Any]] = []
+        now_str = datetime.now().strftime("%H:%M:%S")
+        for ticker, state in self.monitored_stocks.items():
+            if state.state != "ENTERED":
+                continue
+            price = state.current_price
+            unrealized_pnl = 0.0
+            if state.entry_price > 0:
+                unrealized_pnl = ((price - state.entry_price) / state.entry_price) * 100
+            state.state = "EOD_CLOSED"
+            if (
+                self.enable_shadow
+                and state.shadow_trade
+                and state.shadow_trade.id in self.simulator.active_trades
+            ):
+                self.simulator.force_exit_trade(
+                    state.shadow_trade.id, price, reason, now_str
+                )
+            msg = (
+                f"[{now_str}] {ticker}: Flattened ({reason}, "
+                f"{market.get('label', 'market closed')}) at ${price:.2f} "
+                f"({unrealized_pnl:+.2f}%)"
+            )
+            state.messages.append(msg)
+            events.append(
+                {
+                    "ticker": ticker,
+                    "action": reason,
+                    "price": price,
+                    "pnl_pct": round(unrealized_pnl, 2),
+                }
+            )
+            self._emit(
+                EVENT_TRADE_CLOSED,
+                {
+                    "ticker": ticker,
+                    "price": price,
+                    "action": reason,
+                    "pnl_pct": round(unrealized_pnl, 2),
+                    "reason": msg,
+                },
+            )
+        return events
+
+    def _resolve_quote(self, ticker: str) -> Dict[str, Any]:
+        """
+        Prefer the realtime websocket price for a ticker; fall back to the REST
+        quote provider when no fresh streamed trade exists.
+        """
+        if self.ws_client:
+            quote = self.ws_client.get_quote(
+                ticker, max_age_seconds=self.ws_max_age_seconds
+            )
+            if quote and quote.get("price") is not None:
+                return quote
+        return self.quote_provider.get_quote(ticker)
+
+    def _compute_minutes_to_close(self) -> int:
+        """
+        Minutes until the 15:55 EOD flat deadline, computed in the *market's*
+        timezone (America/New_York) from the Finnhub market-status endpoint.
+        Falls back to the same market-local Eastern clock when the provider is
+        unavailable or not configured — never the server's local wall clock.
+        """
+        if self.market_status_provider:
+            try:
+                minutes = self.market_status_provider.minutes_to_close()
+                if minutes is not None:
+                    return minutes
+            except Exception:
+                pass
+
+        try:
+            from zoneinfo import ZoneInfo
+
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+        except Exception:
+            now_et = datetime.now()
+        target_eod_min = 15 * 60 + 55
+        current_day_min = now_et.hour * 60 + now_et.minute
+        return max(0, target_eod_min - current_day_min)
 
     def poll_once(self) -> List[Dict[str, Any]]:
         """
@@ -201,22 +355,41 @@ class IntradayLoopMonitor:
         now_str = now_dt.strftime("%H:%M:%S")
         events = []
 
-        # Calculate minutes to 15:55 EST (16:00 close - 5 mins)
-        target_eod_min = 15 * 60 + 55
-        current_day_min = now_dt.hour * 60 + now_dt.minute
-        minutes_to_close = max(0, target_eod_min - current_day_min)
+        # Market session state. Only the regular US session is tradable; on a
+        # closed market (holiday/weekend) any open positions are flattened and
+        # no entries are evaluated.
+        market = self._market_state()
+        self.market_state = market
+        tradable = market.get("tradable", True)
 
+        # Phase 1: refresh prices for every monitored stock regardless of the
+        # market state so the dashboard (and any flatten) sees live values.
+        resolved = set()
         for ticker, state in self.monitored_stocks.items():
-            quote = self.quote_provider.get_quote(ticker)
+            quote = self._resolve_quote(ticker)
             price = quote.get("price")
             if price is None:
                 continue
-
             price = float(price)
             state.previous_price = state.current_price
             state.current_price = price
             state.highest_price = max(state.highest_price, price)
             state.lowest_price = min(state.lowest_price, price)
+            resolved.add(ticker)
+
+        # Phase 2: closed market -> flatten open positions and stop; else run
+        # the normal agent evaluation on the refreshed prices.
+        if not tradable:
+            return events + self._flatten_open_positions("MARKET_CLOSED", market)
+
+        # Minutes to EOD close, derived from the Finnhub market-status endpoint
+        # (market-local timezone) when available, else the same Eastern clock.
+        minutes_to_close = self._compute_minutes_to_close()
+
+        for ticker, state in self.monitored_stocks.items():
+            if ticker not in resolved:
+                continue
+            price = state.current_price
 
             # Running P&L
             unrealized_pnl = 0.0
@@ -404,6 +577,13 @@ class IntradayLoopMonitor:
         )
         print(f"{'=' * 88}{Style.RESET_ALL}\n")
 
+        market = getattr(self, "market_state", None)
+        if market and not market.get("tradable", True):
+            print(
+                f"{Fore.YELLOW}{Style.BRIGHT}⚠️  {market.get('label', 'MARKET CLOSED')} "
+                f"— no entries; open positions flattened{Style.RESET_ALL}\n"
+            )
+
         print(
             f"{'Ticker':<7} {'Price':<10} {'Change':<10} {'Strategy':<11} {'Status':<12} {'Stop Loss':<10} {'Target 1':<10} {'P&L %':<8} {'Agent Action'}"
         )
@@ -518,6 +698,11 @@ class IntradayLoopMonitor:
             )
         finally:
             self.running = False
+            if self.ws_client:
+                try:
+                    self.ws_client.close()
+                except Exception:
+                    pass
             # Force EOD liquidation
             prices = {t: s.current_price for t, s in self.monitored_stocks.items()}
             self.simulator.force_eod_exit(prices)
