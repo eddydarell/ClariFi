@@ -48,6 +48,7 @@ class SimulatedIntradayTrade:
     cost_basis: float = 0.0  # total dollar cost of this position (shares * entry_price)
     realized_pnl_dollars: float = 0.0
     slippage_cost_pct: float = 0.05  # 0.05% estimated round-trip slippage & fees
+    direction: str = "LONG"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -128,6 +129,9 @@ class IntradaySimulator:
                 return None
             shares = max(1, math.floor(allocation / actual_entry))
 
+        if not isinstance(shares, int) or shares <= 0:
+            return None
+
         cost_basis = round(shares * actual_entry, 2)
 
         # Check if we have enough cash
@@ -156,6 +160,7 @@ class IntradaySimulator:
             status="OPEN",
             shares=shares,
             cost_basis=cost_basis,
+            direction=plan.direction,
         )
 
         self.active_trades[trade.id] = trade
@@ -208,7 +213,12 @@ class IntradaySimulator:
         trade.exit_reason = exit_reason
         trade.exit_time = now_str
 
-        gross = ((trade.exit_price - trade.entry_price) / trade.entry_price) * 100
+        direction_multiplier = 1 if trade.direction == "LONG" else -1
+        gross = (
+            direction_multiplier
+            * ((trade.exit_price - trade.entry_price) / trade.entry_price)
+            * 100
+        )
         trade.gross_pnl_pct = round(gross, 2)
         trade.net_pnl_pct = round(gross - trade.slippage_cost_pct, 2)
 
@@ -218,11 +228,22 @@ class IntradaySimulator:
             trade.cost_basis * (trade.slippage_cost_pct / 100.0), 2
         )
         trade.realized_pnl_dollars = round(
-            proceeds - trade.cost_basis - slippage_dollars, 2
+            (
+                proceeds - trade.cost_basis
+                if trade.direction == "LONG"
+                else trade.cost_basis - proceeds
+            )
+            - slippage_dollars,
+            2,
         )
 
         # Restore cash
-        self.available_cash = round(self.available_cash + proceeds, 2)
+        cash_release = (
+            proceeds - slippage_dollars
+            if trade.direction == "LONG"
+            else trade.cost_basis + trade.realized_pnl_dollars
+        )
+        self.available_cash = round(self.available_cash + cash_release, 2)
         self.invested_amount = round(self.invested_amount - trade.cost_basis, 2)
         self.total_realized_pnl = round(
             self.total_realized_pnl + trade.realized_pnl_dollars, 2
@@ -274,53 +295,55 @@ class IntradaySimulator:
                 continue
 
             # Check Stop Loss Breach
-            if current_price <= trade.stop_loss_price:
+            stop_hit = (
+                current_price <= trade.stop_loss_price
+                if trade.direction == "LONG"
+                else current_price >= trade.stop_loss_price
+            )
+            if stop_hit:
                 trade.status = "STOP_HIT"
                 trades_to_close.append((trade, trade.stop_loss_price, "STOP_LOSS"))
-                events.append(
-                    {
-                        "trade_id": trade.id,
-                        "ticker": trade.ticker,
-                        "event": "STOP_LOSS_TRIGGERED",
-                        "price": current_price,
-                        "pnl_pct": trade.net_pnl_pct,
-                    }
-                )
                 continue
 
             # Check Profit Target 2
-            if trade.target_2_price and current_price >= trade.target_2_price:
+            target_2_hit = (
+                (
+                    current_price >= trade.target_2_price
+                    if trade.direction == "LONG"
+                    else current_price <= trade.target_2_price
+                )
+                if trade.target_2_price
+                else False
+            )
+            if target_2_hit:
                 trade.status = "TARGET_HIT"
                 trades_to_close.append((trade, trade.target_2_price, "TARGET_2"))
-                events.append(
-                    {
-                        "trade_id": trade.id,
-                        "ticker": trade.ticker,
-                        "event": "TARGET_2_TRIGGERED",
-                        "price": current_price,
-                        "pnl_pct": trade.net_pnl_pct,
-                    }
-                )
                 continue
 
             # Check Profit Target 1
-            if current_price >= trade.target_1_price:
+            target_1_hit = (
+                current_price >= trade.target_1_price
+                if trade.direction == "LONG"
+                else current_price <= trade.target_1_price
+            )
+            if target_1_hit:
                 trade.status = "TARGET_HIT"
                 trades_to_close.append((trade, trade.target_1_price, "TARGET_1"))
-                events.append(
-                    {
-                        "trade_id": trade.id,
-                        "ticker": trade.ticker,
-                        "event": "TARGET_1_TRIGGERED",
-                        "price": current_price,
-                        "pnl_pct": trade.net_pnl_pct,
-                    }
-                )
                 continue
 
         # Finalize closed trades
         for trade, exit_price, reason in trades_to_close:
             self._close_trade(trade, exit_price, reason, now_str)
+            events.append(
+                {
+                    "trade_id": trade.id,
+                    "ticker": trade.ticker,
+                    "event": f"{reason}_TRIGGERED",
+                    "price": exit_price,
+                    "pnl_pct": trade.net_pnl_pct,
+                    "realized_pnl_dollars": trade.realized_pnl_dollars,
+                }
+            )
 
         return events
 

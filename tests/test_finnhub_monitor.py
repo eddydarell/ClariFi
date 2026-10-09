@@ -167,8 +167,10 @@ def test_market_status_zero_drives_eod_commit(tmp_path):
         market_status_provider=FakeMarketStatusProvider(minutes=0),
     )
     monitor.add_stocks(["BBBB"], profile="HIGH_RISK")
-    # Auto-open at add_stocks => ENTERED with a shadow trade
-    assert monitor.monitored_stocks["BBBB"].state == "ENTERED"
+    state = monitor.monitored_stocks["BBBB"]
+    state.shadow_trade = sim.open_paper_trade(state.active_plan, fill_price=10.0)
+    state.state = "ENTERED"
+    state.entry_price = 10.0
     assert len(sim.active_trades) == 1
 
     monitor.poll_once()

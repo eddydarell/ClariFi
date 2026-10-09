@@ -15,8 +15,14 @@ from typing import List, Dict, Any, Optional, Optional
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import database models
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from database.models import DatabaseManager, Portfolio, AnalysisResult, CommandHistory, ComparisonResult
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from database.models import (
+    DatabaseManager,
+    Portfolio,
+    AnalysisResult,
+    CommandHistory,
+    ComparisonResult,
+)
 
 # Import existing analysis modules
 from stock_downloader import StockDownloader
@@ -34,6 +40,15 @@ from intraday_strategy import IntradayStrategyGenerator
 from intraday_simulator import IntradaySimulator
 from intraday_monitor import IntradayLoopMonitor
 from intraday_agent import AutonomousIntradayAgent
+from momentum_strategy import (
+    MomentumConfig,
+    backtest as run_momentum_backtest,
+    compute_signals,
+    result_dict as momentum_result_dict,
+    signal_dict as momentum_signal_dict,
+    build_target_portfolio,
+)
+from market_universe import DEFAULT_UNIVERSE
 
 
 class ClariFiEngine:
@@ -59,7 +74,9 @@ class ClariFiEngine:
         self.seasonal_analyzer = SeasonalAnalyzer()
         self.ml_analyzer = MLAnalyzer()
         self.intraday_screener = IntradayScreener(self.quote_provider)
-        self.intraday_strategy_generator = IntradayStrategyGenerator(self.intraday_screener)
+        self.intraday_strategy_generator = IntradayStrategyGenerator(
+            self.intraday_screener
+        )
         self.intraday_simulator = IntradaySimulator(self.db_manager)
         self.intraday_agent = AutonomousIntradayAgent()
 
@@ -73,18 +90,26 @@ class ClariFiEngine:
                 try:
                     # Handle datetime index specially
                     if isinstance(obj.index, pd.DatetimeIndex):
-                        return {str(k): self._make_json_serializable(v) for k, v in obj.to_dict().items()}
+                        return {
+                            str(k): self._make_json_serializable(v)
+                            for k, v in obj.to_dict().items()
+                        }
                     else:
-                        return {str(k): self._make_json_serializable(v) for k, v in obj.to_dict().items()}
+                        return {
+                            str(k): self._make_json_serializable(v)
+                            for k, v in obj.to_dict().items()
+                        }
                 except Exception:
                     # Fallback to list if to_dict() fails
                     try:
-                        return [self._make_json_serializable(item) for item in obj.tolist()]
+                        return [
+                            self._make_json_serializable(item) for item in obj.tolist()
+                        ]
                     except Exception:
                         return str(obj)
             elif isinstance(obj, pd.DataFrame):
                 try:
-                    records = obj.to_dict(orient='records')
+                    records = obj.to_dict(orient="records")
                     return [self._make_json_serializable(record) for record in records]
                 except Exception:
                     # Fallback to dict conversion
@@ -95,7 +120,7 @@ class ClariFiEngine:
             elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
                 return str(obj)
             elif isinstance(obj, (datetime, timedelta)):
-                return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
+                return obj.isoformat() if hasattr(obj, "isoformat") else str(obj)
             elif isinstance(obj, int):
                 return obj
             elif isinstance(obj, float):
@@ -117,10 +142,13 @@ class ClariFiEngine:
             elif isinstance(obj, (np.str_, str)):
                 return str(obj)
             elif isinstance(obj, bytes):
-                return obj.decode('utf-8', errors='ignore')
+                return obj.decode("utf-8", errors="ignore")
             elif isinstance(obj, dict):
                 try:
-                    return {str(key): self._make_json_serializable(value) for key, value in obj.items()}
+                    return {
+                        str(key): self._make_json_serializable(value)
+                        for key, value in obj.items()
+                    }
                 except Exception:
                     return str(obj)
             elif isinstance(obj, (list, tuple, set)):
@@ -128,12 +156,12 @@ class ClariFiEngine:
                     return [self._make_json_serializable(item) for item in obj]
                 except Exception:
                     return str(obj)
-            elif hasattr(obj, '__dict__'):
+            elif hasattr(obj, "__dict__"):
                 # Handle custom class objects by converting their attributes to dict
                 try:
                     result = {}
                     for attr in dir(obj):
-                        if not attr.startswith('_'):
+                        if not attr.startswith("_"):
                             try:
                                 value = getattr(obj, attr)
                                 if not callable(value):
@@ -148,6 +176,7 @@ class ClariFiEngine:
                 try:
                     # Check if it's JSON serializable first
                     import json
+
                     json.dumps(obj)
                     return obj
                 except (TypeError, ValueError):
@@ -159,14 +188,17 @@ class ClariFiEngine:
     def log_command(self, command: str, parameters: Dict[str, Any] = None) -> str:
         """Log command execution"""
         return self.command_model.log_command(
-            command=command,
-            parameters=parameters,
-            status="STARTED"
+            command=command, parameters=parameters, status="STARTED"
         )
 
-    def update_command_status(self, command_id: str, status: str,
-                            execution_time: float = 0.0, output: str = "",
-                            error_message: str = ""):
+    def update_command_status(
+        self,
+        command_id: str,
+        status: str,
+        execution_time: float = 0.0,
+        output: str = "",
+        error_message: str = "",
+    ):
         """Update command execution status"""
         return self.command_model.update_status(
             command_id, status, execution_time, output, error_message
@@ -175,19 +207,21 @@ class ClariFiEngine:
     # Portfolio Management
     def create_portfolio(self, name: str, description: str = "") -> Dict[str, Any]:
         """Create a new portfolio"""
-        command_id = self.log_command("create_portfolio", {"name": name, "description": description})
+        command_id = self.log_command(
+            "create_portfolio", {"name": name, "description": description}
+        )
         try:
             portfolio_id = self.portfolio_model.create(name, description)
             return {
                 "success": True,
                 "portfolio_id": portfolio_id,
-                "message": f"Portfolio '{name}' created successfully"
+                "message": f"Portfolio '{name}' created successfully",
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to create portfolio: {str(e)}"
+                "message": f"Failed to create portfolio: {str(e)}",
             }
 
     def get_portfolios(self) -> List[Dict[str, Any]]:
@@ -198,13 +232,14 @@ class ClariFiEngine:
         """Get portfolio by name"""
         return self.portfolio_model.get_by_name(name)
 
-    def update_portfolio(self, portfolio_id: str, name: str = None, description: str = None) -> Dict[str, Any]:
+    def update_portfolio(
+        self, portfolio_id: str, name: str = None, description: str = None
+    ) -> Dict[str, Any]:
         """Update portfolio name and/or description"""
-        command_id = self.log_command("update_portfolio", {
-            "portfolio_id": portfolio_id,
-            "name": name,
-            "description": description
-        })
+        command_id = self.log_command(
+            "update_portfolio",
+            {"portfolio_id": portfolio_id, "name": name, "description": description},
+        )
 
         try:
             # Check if portfolio exists
@@ -213,7 +248,7 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "Portfolio not found",
-                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                    "message": f"Portfolio with ID {portfolio_id} does not exist",
                 }
 
             # Update portfolio
@@ -222,27 +257,32 @@ class ClariFiEngine:
                 return {
                     "success": True,
                     "message": f"Portfolio updated successfully",
-                    "portfolio_id": portfolio_id
+                    "portfolio_id": portfolio_id,
                 }
             else:
                 return {
                     "success": False,
                     "error": "No changes made",
-                    "message": "No valid fields provided for update"
+                    "message": "No valid fields provided for update",
                 }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to update portfolio: {str(e)}"
+                "message": f"Failed to update portfolio: {str(e)}",
             }
 
-    def delete_portfolio(self, portfolio_id: str, confirmation_name: str) -> Dict[str, Any]:
+    def delete_portfolio(
+        self, portfolio_id: str, confirmation_name: str
+    ) -> Dict[str, Any]:
         """Delete a portfolio with name confirmation"""
-        command_id = self.log_command("delete_portfolio", {
-            "portfolio_id": portfolio_id,
-            "confirmation_provided": bool(confirmation_name)
-        })
+        command_id = self.log_command(
+            "delete_portfolio",
+            {
+                "portfolio_id": portfolio_id,
+                "confirmation_provided": bool(confirmation_name),
+            },
+        )
 
         try:
             # Check if portfolio exists
@@ -251,7 +291,7 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "Portfolio not found",
-                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                    "message": f"Portfolio with ID {portfolio_id} does not exist",
                 }
 
             # Verify confirmation name (case sensitive)
@@ -260,7 +300,7 @@ class ClariFiEngine:
                     "success": False,
                     "error": "Name confirmation failed",
                     "message": f"Please type the exact portfolio name '{portfolio['name']}' to confirm deletion",
-                    "warning": "⚠️  Portfolio deletion is irreversible and will remove all associated data!"
+                    "warning": "⚠️  Portfolio deletion is irreversible and will remove all associated data!",
                 }
 
             # Get tickers count for warning message
@@ -274,19 +314,19 @@ class ClariFiEngine:
                     "success": True,
                     "message": f"Portfolio '{portfolio['name']}' deleted successfully",
                     "deleted_tickers": ticker_count,
-                    "portfolio_id": portfolio_id
+                    "portfolio_id": portfolio_id,
                 }
             else:
                 return {
                     "success": False,
                     "error": "Deletion failed",
-                    "message": "Failed to delete portfolio from database"
+                    "message": "Failed to delete portfolio from database",
                 }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to delete portfolio: {str(e)}"
+                "message": f"Failed to delete portfolio: {str(e)}",
             }
 
     def sync_portfolio_prices(self, portfolio_id: str) -> Dict[str, Any]:
@@ -301,7 +341,7 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "Portfolio not found",
-                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                    "message": f"Portfolio with ID {portfolio_id} does not exist",
                 }
 
             # Get all tickers in portfolio
@@ -311,7 +351,7 @@ class ClariFiEngine:
                     "success": True,
                     "message": "No tickers in portfolio to sync",
                     "portfolio_name": portfolio["name"],
-                    "synced_tickers": 0
+                    "synced_tickers": 0,
                 }
 
             sync_results = {}
@@ -338,19 +378,31 @@ class ClariFiEngine:
                                 "success": True,
                                 "previous_price": ticker_data.get("current_price", 0.0),
                                 "current_price": latest_price,
-                                "price_change": latest_price - ticker_data.get("current_price", 0.0),
-                                "price_change_pct": ((latest_price / ticker_data.get("current_price", latest_price)) - 1) * 100 if ticker_data.get("current_price", 0) > 0 else 0.0,
+                                "price_change": latest_price
+                                - ticker_data.get("current_price", 0.0),
+                                "price_change_pct": (
+                                    (
+                                        latest_price
+                                        / ticker_data.get("current_price", latest_price)
+                                    )
+                                    - 1
+                                )
+                                * 100
+                                if ticker_data.get("current_price", 0) > 0
+                                else 0.0,
                                 "quote_provider": quote["provider"],
                                 "quote_freshness": quote["freshness"],
                                 "quote_timestamp": quote["timestamp"],
                                 "quote_cached": quote["cached"],
                             }
                             successful_syncs += 1
-                            print(f"✅ {ticker}: ${latest_price:.2f} ({quote['freshness']})")
+                            print(
+                                f"✅ {ticker}: ${latest_price:.2f} ({quote['freshness']})"
+                            )
                         else:
                             sync_results[ticker] = {
                                 "success": False,
-                                "error": "Database update failed"
+                                "error": "Database update failed",
                             }
                             failed_syncs += 1
                     else:
@@ -364,10 +416,7 @@ class ClariFiEngine:
                         print(f"❌ {ticker}: Failed to fetch price data")
 
                 except Exception as e:
-                    sync_results[ticker] = {
-                        "success": False,
-                        "error": str(e)
-                    }
+                    sync_results[ticker] = {"success": False, "error": str(e)}
                     failed_syncs += 1
                     print(f"❌ {ticker}: {str(e)}")
 
@@ -383,7 +432,7 @@ class ClariFiEngine:
                 "failed_syncs": failed_syncs,
                 "sync_results": sync_results,
                 "execution_time": execution_time,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
         except Exception as e:
@@ -392,72 +441,91 @@ class ClariFiEngine:
                 "success": False,
                 "error": str(e),
                 "message": f"Failed to sync portfolio: {str(e)}",
-                "execution_time": execution_time
+                "execution_time": execution_time,
             }
 
-    def add_ticker_to_portfolio(self, portfolio_id: str, ticker: str,
-                               quantity: float = 0.0, avg_cost: float = 0.0) -> Dict[str, Any]:
+    def add_ticker_to_portfolio(
+        self,
+        portfolio_id: str,
+        ticker: str,
+        quantity: float = 0.0,
+        avg_cost: float = 0.0,
+    ) -> Dict[str, Any]:
         """Add a ticker to a portfolio"""
-        command_id = self.log_command("add_ticker", {
-            "portfolio_id": portfolio_id,
-            "ticker": ticker,
-            "quantity": quantity,
-            "avg_cost": avg_cost
-        })
+        command_id = self.log_command(
+            "add_ticker",
+            {
+                "portfolio_id": portfolio_id,
+                "ticker": ticker,
+                "quantity": quantity,
+                "avg_cost": avg_cost,
+            },
+        )
 
         try:
-            ticker_id = self.portfolio_model.add_ticker(portfolio_id, ticker, quantity, avg_cost)
+            ticker_id = self.portfolio_model.add_ticker(
+                portfolio_id, ticker, quantity, avg_cost
+            )
             return {
                 "success": True,
                 "ticker_id": ticker_id,
-                "message": f"Ticker {ticker} added to portfolio successfully"
+                "message": f"Ticker {ticker} added to portfolio successfully",
             }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to add ticker: {str(e)}"
+                "message": f"Failed to add ticker: {str(e)}",
             }
 
-    def remove_ticker_from_portfolio(self, portfolio_id: str, ticker: str) -> Dict[str, Any]:
+    def remove_ticker_from_portfolio(
+        self, portfolio_id: str, ticker: str
+    ) -> Dict[str, Any]:
         """Remove a ticker from a portfolio"""
-        command_id = self.log_command("remove_ticker", {
-            "portfolio_id": portfolio_id,
-            "ticker": ticker
-        })
+        command_id = self.log_command(
+            "remove_ticker", {"portfolio_id": portfolio_id, "ticker": ticker}
+        )
 
         try:
             success = self.portfolio_model.remove_ticker(portfolio_id, ticker)
             if success:
                 return {
                     "success": True,
-                    "message": f"Ticker {ticker} removed from portfolio successfully"
+                    "message": f"Ticker {ticker} removed from portfolio successfully",
                 }
             else:
                 return {
                     "success": False,
-                    "message": f"Ticker {ticker} not found in portfolio"
+                    "message": f"Ticker {ticker} not found in portfolio",
                 }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to remove ticker: {str(e)}"
+                "message": f"Failed to remove ticker: {str(e)}",
             }
 
     def get_portfolio_tickers(self, portfolio_id: str) -> List[Dict[str, Any]]:
         """Get all tickers in a portfolio"""
         return self.portfolio_model.get_tickers(portfolio_id)
 
-    def update_ticker_in_portfolio(self, portfolio_id: str, ticker: str,
-                                 quantity: float = None, avg_cost: float = None) -> Dict[str, Any]:
+    def update_ticker_in_portfolio(
+        self,
+        portfolio_id: str,
+        ticker: str,
+        quantity: float = None,
+        avg_cost: float = None,
+    ) -> Dict[str, Any]:
         """Update ticker quantity and/or average cost in a portfolio"""
-        command_id = self.log_command("update_ticker", {
-            "portfolio_id": portfolio_id,
-            "ticker": ticker,
-            "quantity": quantity,
-            "avg_cost": avg_cost
-        })
+        command_id = self.log_command(
+            "update_ticker",
+            {
+                "portfolio_id": portfolio_id,
+                "ticker": ticker,
+                "quantity": quantity,
+                "avg_cost": avg_cost,
+            },
+        )
 
         try:
             # Validate that at least one field is provided
@@ -465,7 +533,7 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "No updates provided",
-                    "message": "At least one of quantity or avg_cost must be provided"
+                    "message": "At least one of quantity or avg_cost must be provided",
                 }
 
             # Check if portfolio exists
@@ -474,26 +542,28 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "Portfolio not found",
-                    "message": f"Portfolio with ID {portfolio_id} does not exist"
+                    "message": f"Portfolio with ID {portfolio_id} does not exist",
                 }
 
             # Check if ticker exists in portfolio
             tickers = self.portfolio_model.get_tickers(portfolio_id)
-            ticker_exists = any(t['ticker'].upper() == ticker.upper() for t in tickers)
+            ticker_exists = any(t["ticker"].upper() == ticker.upper() for t in tickers)
             if not ticker_exists:
                 return {
                     "success": False,
                     "error": "Ticker not found",
-                    "message": f"Ticker {ticker.upper()} not found in portfolio"
+                    "message": f"Ticker {ticker.upper()} not found in portfolio",
                 }
 
             # Update the ticker
-            success = self.portfolio_model.update_ticker(portfolio_id, ticker, quantity, avg_cost)
+            success = self.portfolio_model.update_ticker(
+                portfolio_id, ticker, quantity, avg_cost
+            )
             if success:
                 response = {
                     "success": True,
                     "message": f"Ticker {ticker.upper()} updated successfully",
-                    "ticker": ticker.upper()
+                    "ticker": ticker.upper(),
                 }
                 if quantity is not None:
                     response["new_quantity"] = quantity
@@ -504,19 +574,21 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": "Update failed",
-                    "message": "Failed to update ticker in database"
+                    "message": "Failed to update ticker in database",
                 }
 
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to update ticker: {str(e)}"
+                "message": f"Failed to update ticker: {str(e)}",
             }
 
     def get_portfolio_info(self, portfolio_id: str) -> Dict[str, Any]:
         """Get comprehensive portfolio information"""
-        command_id = self.log_command("get_portfolio_info", {"portfolio_id": portfolio_id})
+        command_id = self.log_command(
+            "get_portfolio_info", {"portfolio_id": portfolio_id}
+        )
 
         try:
             # Get comprehensive portfolio information from database
@@ -526,96 +598,125 @@ class ClariFiEngine:
                 return {
                     "success": False,
                     "error": portfolio_info["error"],
-                    "message": portfolio_info["error"]
+                    "message": portfolio_info["error"],
                 }
 
             # Update current prices for all tickers if needed
-            for ticker_info in portfolio_info['tickers']:
-                ticker = ticker_info['ticker']
+            for ticker_info in portfolio_info["tickers"]:
+                ticker = ticker_info["ticker"]
                 try:
                     # Get latest price data using period parameter with None for start/end dates
-                    stock_data = self.downloader.download_stock_data(ticker, None, None, period="1d")
+                    stock_data = self.downloader.download_stock_data(
+                        ticker, None, None, period="1d"
+                    )
                     if stock_data is not None and not stock_data.empty:
-                        current_price = float(stock_data['Close'].iloc[-1])
+                        current_price = float(stock_data["Close"].iloc[-1])
                         # Update price in database
-                        self.portfolio_model.update_ticker_price(portfolio_id, ticker, current_price)
+                        self.portfolio_model.update_ticker_price(
+                            portfolio_id, ticker, current_price
+                        )
                         # Update the info with fresh price
-                        ticker_info['current_price'] = current_price
-                        if ticker_info['quantity']:
-                            ticker_info['current_value'] = current_price * ticker_info['quantity']
-                            if ticker_info['avg_cost']:
-                                ticker_info['unrealized_pnl'] = (current_price - ticker_info['avg_cost']) * ticker_info['quantity']
-                                ticker_info['percentage_change'] = ((current_price - ticker_info['avg_cost']) / ticker_info['avg_cost']) * 100
+                        ticker_info["current_price"] = current_price
+                        if ticker_info["quantity"]:
+                            ticker_info["current_value"] = (
+                                current_price * ticker_info["quantity"]
+                            )
+                            if ticker_info["avg_cost"]:
+                                ticker_info["unrealized_pnl"] = (
+                                    current_price - ticker_info["avg_cost"]
+                                ) * ticker_info["quantity"]
+                                ticker_info["percentage_change"] = (
+                                    (current_price - ticker_info["avg_cost"])
+                                    / ticker_info["avg_cost"]
+                                ) * 100
                 except Exception as price_error:
-                    print(f"Warning: Could not update price for {ticker}: {price_error}")
+                    print(
+                        f"Warning: Could not update price for {ticker}: {price_error}"
+                    )
 
             # Recalculate summary with updated prices
-            total_current_value = sum(t.get('current_value', 0) or 0 for t in portfolio_info['tickers'])
-            total_cost = sum(t.get('total_cost', 0) or 0 for t in portfolio_info['tickers'])
-            total_unrealized_pnl = sum(t.get('unrealized_pnl', 0) or 0 for t in portfolio_info['tickers'])
+            total_current_value = sum(
+                t.get("current_value", 0) or 0 for t in portfolio_info["tickers"]
+            )
+            total_cost = sum(
+                t.get("total_cost", 0) or 0 for t in portfolio_info["tickers"]
+            )
+            total_unrealized_pnl = sum(
+                t.get("unrealized_pnl", 0) or 0 for t in portfolio_info["tickers"]
+            )
             portfolio_percentage_change = 0
             if total_cost > 0:
-                portfolio_percentage_change = ((total_current_value - total_cost) / total_cost) * 100
+                portfolio_percentage_change = (
+                    (total_current_value - total_cost) / total_cost
+                ) * 100
 
-            portfolio_info['summary'] = {
-                'total_tickers': len(portfolio_info['tickers']),
-                'total_current_value': round(total_current_value, 2),
-                'total_cost': round(total_cost, 2),
-                'total_unrealized_pnl': round(total_unrealized_pnl, 2),
-                'portfolio_percentage_change': round(portfolio_percentage_change, 2)
+            portfolio_info["summary"] = {
+                "total_tickers": len(portfolio_info["tickers"]),
+                "total_current_value": round(total_current_value, 2),
+                "total_cost": round(total_cost, 2),
+                "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+                "portfolio_percentage_change": round(portfolio_percentage_change, 2),
             }
 
-            return {
-                "success": True,
-                "data": portfolio_info
-            }
+            return {"success": True, "data": portfolio_info}
 
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to get portfolio info: {str(e)}"
+                "message": f"Failed to get portfolio info: {str(e)}",
             }
 
     def get_portfolio_analytics(self, portfolio_id: str) -> Dict[str, Any]:
         """Get advanced portfolio analytics and insights"""
-        command_id = self.log_command("get_portfolio_analytics", {"portfolio_id": portfolio_id})
+        command_id = self.log_command(
+            "get_portfolio_analytics", {"portfolio_id": portfolio_id}
+        )
 
         try:
             analytics = self.portfolio_model.get_portfolio_analytics(portfolio_id)
 
-            return {
-                "success": True,
-                "data": analytics
-            }
+            return {"success": True, "data": analytics}
 
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Failed to get portfolio analytics: {str(e)}"
+                "message": f"Failed to get portfolio analytics: {str(e)}",
             }
 
     # Analysis Methods
-    def comprehensive_analysis(self, tickers: List[str], portfolio_id: str = None,
-                             period: str = "1y", save_to_db: bool = True,
-                             include_patterns: bool = True, include_events: bool = True,
-                             include_options: bool = True, include_seasonal: bool = True,
-                             include_ml: bool = False, include_deep: bool = False, deep_chunk_months: int = 3) -> Dict[str, Any]:
+    def comprehensive_analysis(
+        self,
+        tickers: List[str],
+        portfolio_id: str = None,
+        period: str = "1y",
+        save_to_db: bool = True,
+        include_patterns: bool = True,
+        include_events: bool = True,
+        include_options: bool = True,
+        include_seasonal: bool = True,
+        include_ml: bool = False,
+        include_deep: bool = False,
+        deep_chunk_months: int = 3,
+    ) -> Dict[str, Any]:
         """Perform comprehensive analysis on tickers"""
 
-        command_id = self.log_command("comprehensive_analysis", {
-            "tickers": tickers,
-            "portfolio_id": portfolio_id,
-            "period": period,
-            "include_patterns": include_patterns,
-            "include_events": include_events,
-            "include_options": include_options,
-            "include_seasonal": include_seasonal,
-            "include_ml": include_ml,
-            "include_deep": include_deep,
-            "deep_chunk_months": deep_chunk_months
-        })
+        command_id = self.log_command(
+            "comprehensive_analysis",
+            {
+                "tickers": tickers,
+                "portfolio_id": portfolio_id,
+                "period": period,
+                "include_patterns": include_patterns,
+                "include_events": include_events,
+                "include_options": include_options,
+                "include_seasonal": include_seasonal,
+                "include_ml": include_ml,
+                "include_deep": include_deep,
+                "deep_chunk_months": deep_chunk_months,
+            },
+        )
 
         start_time = time.time()
         results = {}
@@ -630,19 +731,15 @@ class ClariFiEngine:
 
                     # Download data
                     print(f"📥 Downloading data for {ticker}...")
-                    stock_data = self.downloader.download_stock_data(ticker, None, None, period=period)
+                    stock_data = self.downloader.download_stock_data(
+                        ticker, None, None, period=period
+                    )
 
                     if stock_data is None:
                         print(f"⚠️  Warning: No data found for ticker {ticker}")
-                        ticker_results["error"] = f"Failed to download data for {ticker}"
-                        results[ticker] = ticker_results
-                        continue
-
-                    # Save the downloaded data for analysis
-                    saved_file = self.downloader.save_to_csv(stock_data, ticker)
-                    if not saved_file:
-                        print(f"⚠️  Warning: Failed to save data for {ticker}")
-                        ticker_results["error"] = f"Failed to save data for {ticker}"
+                        ticker_results["error"] = (
+                            f"Failed to download data for {ticker}"
+                        )
                         results[ticker] = ticker_results
                         continue
 
@@ -651,43 +748,92 @@ class ClariFiEngine:
                         print(f"📊 Running pattern analysis for {ticker}...")
                         try:
                             stock_data_dict = {ticker: stock_data}
-                            pattern_data = self.pattern_analyzer.analyze_correlation_patterns(stock_data_dict)
+                            pattern_data = (
+                                self.pattern_analyzer.analyze_correlation_patterns(
+                                    stock_data_dict
+                                )
+                            )
                             # Ensure JSON serializable
-                            ticker_results["patterns"] = self._make_json_serializable(pattern_data)
+                            ticker_results["patterns"] = self._make_json_serializable(
+                                pattern_data
+                            )
                         except Exception as e:
                             print(f"⚠️  Pattern analysis failed for {ticker}: {str(e)}")
-                            ticker_results["patterns"] = {"error": f"Pattern analysis failed: {str(e)}"}
+                            ticker_results["patterns"] = {
+                                "error": f"Pattern analysis failed: {str(e)}"
+                            }
+
+                    # Keep single-ticker momentum evidence visible in deep-dive
+                    # output without presenting it as a portfolio rank.
+                    try:
+                        momentum_signals = compute_signals({ticker: stock_data})
+                        ticker_results["momentum"] = momentum_signal_dict(
+                            momentum_signals[0]
+                        )
+                    except Exception as e:
+                        ticker_results["momentum"] = {
+                            "eligible": False,
+                            "exclusion_reasons": [f"momentum_unavailable:{e}"],
+                        }
+                    ticker_results["data_gaps"] = {
+                        "fundamentals": "unavailable: no configured fundamentals provider in comprehensive pipeline",
+                        "live_news_and_sentiment": "unavailable: event store is not a live news feed",
+                        "earnings_calendar": "unavailable: no point-in-time earnings calendar loaded",
+                        "market_option_chain": "unavailable: options output is theoretical and uses historical volatility",
+                    }
 
                     # Event Correlation
                     if include_events:
                         print(f"📰 Running event correlation analysis for {ticker}...")
                         try:
                             stock_data_dict = {ticker: stock_data}
-                            event_data = self.event_correlator.correlate_events_with_movements(stock_data_dict)
+                            event_data = (
+                                self.event_correlator.correlate_events_with_movements(
+                                    stock_data_dict
+                                )
+                            )
                             # Ensure JSON serializable
-                            ticker_results["events"] = self._make_json_serializable(event_data)
+                            ticker_results["events"] = self._make_json_serializable(
+                                event_data
+                            )
                         except Exception as e:
                             print(f"⚠️  Event analysis failed for {ticker}: {str(e)}")
-                            ticker_results["events"] = {"error": f"Event analysis failed: {str(e)}"}
+                            ticker_results["events"] = {
+                                "error": f"Event analysis failed: {str(e)}"
+                            }
 
                     # Options Analysis
                     if include_options:
                         print(f"⚖️ Running options analysis for {ticker}...")
                         try:
-                            options_data = self.options_analyzer.analyze_options(ticker, stock_data)
+                            options_data = self.options_analyzer.analyze_options(
+                                ticker, stock_data
+                            )
                             # Ensure JSON serializable
-                            ticker_results["options"] = self._make_json_serializable(options_data)
+                            ticker_results["options"] = self._make_json_serializable(
+                                options_data
+                            )
                         except Exception as e:
                             print(f"⚠️  Options analysis failed for {ticker}: {str(e)}")
-                            ticker_results["options"] = {"error": f"Options analysis failed: {str(e)}"}
+                            ticker_results["options"] = {
+                                "error": f"Options analysis failed: {str(e)}"
+                            }
 
                         try:
-                            investment_advice = self.investment_advisor.generate_investment_suggestion(stock_data)
+                            investment_advice = (
+                                self.investment_advisor.generate_investment_suggestion(
+                                    stock_data
+                                )
+                            )
                             # Ensure JSON serializable
-                            ticker_results["investment_advice"] = self._make_json_serializable(investment_advice)
+                            ticker_results["investment_advice"] = (
+                                self._make_json_serializable(investment_advice)
+                            )
                         except Exception as e:
                             print(f"⚠️  Investment advice failed for {ticker}: {str(e)}")
-                            ticker_results["investment_advice"] = {"error": f"Investment advice failed: {str(e)}"}
+                            ticker_results["investment_advice"] = {
+                                "error": f"Investment advice failed: {str(e)}"
+                            }
 
                     # Seasonal Analysis
                     if include_seasonal:
@@ -695,41 +841,61 @@ class ClariFiEngine:
                         try:
                             seasonal_data = self.seasonal_analyzer.analyze(stock_data)
                             # Ensure JSON serializable
-                            ticker_results["seasonal"] = self._make_json_serializable(seasonal_data)
+                            ticker_results["seasonal"] = self._make_json_serializable(
+                                seasonal_data
+                            )
                         except Exception as e:
                             print(f"⚠️  Seasonal analysis failed for {ticker}: {str(e)}")
-                            ticker_results["seasonal"] = {"error": f"Seasonal analysis failed: {str(e)}"}
+                            ticker_results["seasonal"] = {
+                                "error": f"Seasonal analysis failed: {str(e)}"
+                            }
 
                     # ML Analysis
                     if include_ml:
                         print(f"🤖 Running ML analysis for {ticker}...")
                         try:
-                            ml_data = self.ml_analyzer.analyze(stock_data, ticker, prediction_horizon=5)
+                            ml_data = self.ml_analyzer.analyze(
+                                stock_data, ticker, prediction_horizon=5
+                            )
                             # Ensure JSON serializable
-                            ticker_results["ml_analysis"] = self._make_json_serializable(ml_data)
+                            ticker_results["ml_analysis"] = (
+                                self._make_json_serializable(ml_data)
+                            )
                         except Exception as e:
                             print(f"⚠️  ML analysis failed for {ticker}: {str(e)}")
-                            ticker_results["ml_analysis"] = {"error": f"ML analysis failed: {str(e)}"}
+                            ticker_results["ml_analysis"] = {
+                                "error": f"ML analysis failed: {str(e)}"
+                            }
 
                     # Deep (historical chunk) Analysis / Backtesting
                     if include_deep:
-                        print(f"🔁 Running deep backtesting analysis for {ticker} (chunk={deep_chunk_months}mo)...")
+                        print(
+                            f"🔁 Running deep backtesting analysis for {ticker} (chunk={deep_chunk_months}mo)..."
+                        )
                         try:
                             deep_result = self._run_deep_analysis(
                                 ticker,
                                 stock_data.copy(),
-                                chunk_months=deep_chunk_months
+                                chunk_months=deep_chunk_months,
                             )
                             # Ensure JSON serializable
-                            ticker_results["deep_analysis"] = self._make_json_serializable(deep_result)
+                            ticker_results["deep_analysis"] = (
+                                self._make_json_serializable(deep_result)
+                            )
                             # Attach coefficient of precision at top-level
                             if deep_result and isinstance(deep_result, dict):
                                 summary = deep_result.get("summary", {})
                                 if "coefficient_of_precision" in summary:
-                                    ticker_results["coefficient_of_precision"] = summary["coefficient_of_precision"]
+                                    ticker_results["coefficient_of_precision"] = (
+                                        summary["coefficient_of_precision"]
+                                    )
                         except Exception as e:
-                            print(f"⚠️  Deep analysis failed HERE for {ticker}: {str(e)}")
-                            ticker_results["deep_analysis"] = {"error": f"Deep analysis failed: {str(e)}"}
+                            print(
+                                f"⚠️  Deep analysis failed HERE for {ticker}: {str(e)}"
+                            )
+                            ticker_results["deep_analysis"] = {
+                                "error": f"Deep analysis failed: {str(e)}"
+                            }
 
                     # Strategy combines the current analysis inputs into future BUY,
                     # SELL, and hold-period price recommendations.
@@ -742,19 +908,27 @@ class ClariFiEngine:
                             deep_analysis=deep_result,
                             find_optimum=True,
                         )
-                        ticker_results["strategy"] = self._make_json_serializable(strategy)
+                        ticker_results["strategy"] = self._make_json_serializable(
+                            strategy
+                        )
                     except Exception as e:
                         print(f"⚠️  Strategy generation failed for {ticker}: {str(e)}")
-                        ticker_results["strategy"] = {"error": f"Strategy generation failed: {str(e)}"}
+                        ticker_results["strategy"] = {
+                            "error": f"Strategy generation failed: {str(e)}"
+                        }
 
                     # Generate overall recommendation
                     try:
-                        recommendation, confidence, risk_level = self._generate_overall_recommendation(ticker_results)
+                        recommendation, confidence, risk_level = (
+                            self._generate_overall_recommendation(ticker_results)
+                        )
                         ticker_results["overall_recommendation"] = recommendation
                         ticker_results["confidence_level"] = confidence
                         ticker_results["risk_level"] = risk_level
                     except Exception as e:
-                        print(f"⚠️  Recommendation generation failed for {ticker}: {str(e)}")
+                        print(
+                            f"⚠️  Recommendation generation failed for {ticker}: {str(e)}"
+                        )
                         ticker_results["overall_recommendation"] = "HOLD"
                         ticker_results["confidence_level"] = "LOW"
                         ticker_results["risk_level"] = "MEDIUM"
@@ -763,19 +937,27 @@ class ClariFiEngine:
                     if save_to_db:
                         try:
                             # Ensure ticker_results is JSON serializable before saving
-                            serializable_ticker_results = self._make_json_serializable(ticker_results)
+                            serializable_ticker_results = self._make_json_serializable(
+                                ticker_results
+                            )
                             analysis_id = self.analysis_model.save(
                                 portfolio_id=portfolio_id,
                                 ticker=ticker,
                                 analysis_type="comprehensive",
                                 analysis_data=serializable_ticker_results,
-                                recommendation=ticker_results.get("overall_recommendation", "HOLD"),
-                                confidence_level=ticker_results.get("confidence_level", "LOW"),
-                                risk_level=ticker_results.get("risk_level", "MEDIUM")
+                                recommendation=ticker_results.get(
+                                    "overall_recommendation", "HOLD"
+                                ),
+                                confidence_level=ticker_results.get(
+                                    "confidence_level", "LOW"
+                                ),
+                                risk_level=ticker_results.get("risk_level", "MEDIUM"),
                             )
                             ticker_results["analysis_id"] = analysis_id
                         except Exception as e:
-                            print(f"⚠️  Failed to save analysis to database for {ticker}: {str(e)}")
+                            print(
+                                f"⚠️  Failed to save analysis to database for {ticker}: {str(e)}"
+                            )
 
                     # Ensure final ticker results are JSON serializable
                     results[ticker] = self._make_json_serializable(ticker_results)
@@ -783,11 +965,13 @@ class ClariFiEngine:
                 except Exception as e:
                     # If individual ticker analysis fails completely, store the error
                     print(f"❌ Complete analysis failure for {ticker}: {str(e)}")
-                    results[ticker] = self._make_json_serializable({
-                        "error": f"Complete analysis failure: {str(e)}",
-                        "ticker": ticker,
-                        "timestamp": datetime.now().isoformat()
-                    })
+                    results[ticker] = self._make_json_serializable(
+                        {
+                            "error": f"Complete analysis failure: {str(e)}",
+                            "ticker": ticker,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
 
             execution_time = time.time() - start_time
 
@@ -797,12 +981,26 @@ class ClariFiEngine:
             except Exception as e:
                 raise Exception(f"JSON serialization failed: {str(e)}")
 
+            successful_tickers = [
+                ticker
+                for ticker, value in results.items()
+                if isinstance(value, dict) and "error" not in value
+            ]
+            status = (
+                "ok"
+                if len(successful_tickers) == len(tickers)
+                else "partial"
+                if successful_tickers
+                else "error"
+            )
             return {
-                "success": True,
+                "success": bool(successful_tickers),
+                "status": status,
                 "results": serializable_results,
                 "execution_time": execution_time,
-                "analyzed_tickers": len(tickers),
-                "timestamp": datetime.now().isoformat()
+                "requested_tickers": len(tickers),
+                "analyzed_tickers": len(successful_tickers),
+                "timestamp": datetime.now().isoformat(),
             }
 
         except Exception as e:
@@ -813,8 +1011,71 @@ class ClariFiEngine:
                 "success": False,
                 "error": str(e),
                 "execution_time": execution_time,
-                "partial_results": partial_results
+                "partial_results": partial_results,
             }
+
+    def momentum_analysis(
+        self,
+        tickers: Optional[List[str]] = None,
+        period: str = "5y",
+        config: Optional[MomentumConfig] = None,
+        run_backtest: bool = True,
+    ) -> Dict[str, Any]:
+        """Run the canonical cross-sectional momentum research pipeline."""
+        config = config or MomentumConfig()
+        requested = [
+            ticker.strip().upper()
+            for ticker in (tickers or DEFAULT_UNIVERSE)
+            if ticker.strip()
+        ]
+        frames: Dict[str, pd.DataFrame] = {}
+        errors: Dict[str, str] = {}
+        for ticker in requested:
+            data = self.downloader.download_stock_data(ticker, period=period)
+            if data is None or data.empty:
+                errors[ticker] = "no_market_data"
+            else:
+                frames[ticker] = data
+
+        benchmark = frames.get(config.benchmark)
+        if benchmark is None:
+            benchmark = self.downloader.download_stock_data(
+                config.benchmark, period=period
+            )
+            if benchmark is not None and not benchmark.empty:
+                frames[config.benchmark] = benchmark
+        if benchmark is None or benchmark.empty:
+            return {
+                "success": False,
+                "status": "error",
+                "errors": {**errors, config.benchmark: "benchmark_unavailable"},
+                "strategy_id": "cross_sectional_momentum_12_1_v1",
+            }
+
+        signals = compute_signals(frames, config=config)
+        target = build_target_portfolio(signals, benchmark, config=config)
+        result: Dict[str, Any] = {
+            "success": True,
+            "status": "partial" if errors else "ok",
+            "strategy_id": "cross_sectional_momentum_12_1_v1",
+            "methodology": {
+                "lookbacks": config.lookbacks,
+                "skip_sessions": config.skip_sessions,
+                "entry_percentile": config.entry_percentile,
+                "retention_percentile": config.retention_percentile,
+                "benchmark": config.benchmark,
+                "one_way_cost_bps": config.one_way_cost_bps,
+                "decision_support_only": True,
+            },
+            "signals": [momentum_signal_dict(signal) for signal in signals],
+            "target_portfolio": target,
+            "errors": errors,
+        }
+        if run_backtest:
+            result["backtest"] = momentum_result_dict(
+                run_momentum_backtest(frames, benchmark, config)
+            )
+        return self._make_json_serializable(result)
 
     def _generate_overall_recommendation(self, analysis_data: Dict[str, Any]) -> tuple:
         """Generate overall recommendation from analysis data"""
@@ -825,15 +1086,39 @@ class ClariFiEngine:
         # Extract recommendations from different analyses
         if "investment_advice" in analysis_data:
             advice = analysis_data["investment_advice"]
-            if isinstance(advice, dict) and "recommendation" in advice:
-                recommendations.append(advice["recommendation"])
-                if "confidence" in advice:
-                    confidence_scores.append(advice["confidence"])
+            if isinstance(advice, dict):
+                recommendation = advice.get("recommendation", advice.get("suggestion"))
+                if recommendation:
+                    recommendations.append(recommendation)
+                confidence = advice.get("confidence")
+                if isinstance(confidence, (int, float)):
+                    confidence_scores.append(float(confidence))
+                elif str(confidence).upper() in {"HIGH", "MEDIUM", "LOW"}:
+                    confidence_scores.append(
+                        {"HIGH": 0.85, "MEDIUM": 0.55, "LOW": 0.25}[
+                            str(confidence).upper()
+                        ]
+                    )
 
         if "options" in analysis_data:
             options = analysis_data["options"]
-            if isinstance(options, dict) and "risk_level" in options:
-                risk_scores.append(options["risk_level"])
+            if isinstance(options, dict):
+                risk = options.get("risk_level", options.get("risk_assessment"))
+                if risk:
+                    risk_scores.append(risk)
+
+        strategy = analysis_data.get("strategy")
+        if isinstance(strategy, dict):
+            action = strategy.get("action")
+            if action and strategy.get("decision_status", "ACTIONABLE") != "SUPPRESSED":
+                recommendations.append(action)
+            strategy_confidence = strategy.get("confidence")
+            if str(strategy_confidence).upper() in {"HIGH", "MEDIUM", "LOW"}:
+                confidence_scores.append(
+                    {"HIGH": 0.85, "MEDIUM": 0.55, "LOW": 0.25}[
+                        str(strategy_confidence).upper()
+                    ]
+                )
 
         # Simple logic to combine recommendations
         if not recommendations:
@@ -872,8 +1157,9 @@ class ClariFiEngine:
 
         return overall_rec, confidence, risk_level
 
-    def get_analysis_history(self, ticker: str = None, portfolio_id: str = None,
-                           limit: int = 20) -> List[Dict[str, Any]]:
+    def get_analysis_history(
+        self, ticker: str = None, portfolio_id: str = None, limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """Get analysis history"""
         if ticker:
             return self.analysis_model.get_by_ticker(ticker, limit)
@@ -887,16 +1173,19 @@ class ClariFiEngine:
         """Get command execution history"""
         return self.command_model.get_recent(limit)
 
-    def compare_predictions_vs_actual(self, ticker: str, portfolio_id: str = None,
-                                    prediction_data: Dict[str, Any] = None,
-                                    days_ahead: int = 30) -> Dict[str, Any]:
+    def compare_predictions_vs_actual(
+        self,
+        ticker: str,
+        portfolio_id: str = None,
+        prediction_data: Dict[str, Any] = None,
+        days_ahead: int = 30,
+    ) -> Dict[str, Any]:
         """Compare predictions vs actual results"""
 
-        command_id = self.log_command("compare_predictions", {
-            "ticker": ticker,
-            "portfolio_id": portfolio_id,
-            "days_ahead": days_ahead
-        })
+        command_id = self.log_command(
+            "compare_predictions",
+            {"ticker": ticker, "portfolio_id": portfolio_id, "days_ahead": days_ahead},
+        )
 
         try:
             # Get recent analysis for comparison
@@ -905,7 +1194,7 @@ class ClariFiEngine:
                 if not recent_analyses:
                     return {
                         "success": False,
-                        "error": "No recent analysis found for comparison"
+                        "error": "No recent analysis found for comparison",
                     }
                 prediction_data = recent_analyses[0]["analysis_data"]
 
@@ -913,52 +1202,22 @@ class ClariFiEngine:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=days_ahead)
 
-            # This would need to be implemented to get actual price data
-            # For now, we'll create a placeholder
-            actual_data = {
-                "ticker": ticker,
-                "period": f"{days_ahead}d",
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "actual_price_change": 0.0,  # Would calculate from actual data
-                "actual_volatility": 0.0,    # Would calculate from actual data
-            }
-
-            # Calculate comparison metrics
-            comparison_metrics = self._calculate_comparison_metrics(prediction_data, actual_data)
-
-            # Calculate accuracy score
-            accuracy_score = comparison_metrics.get("overall_accuracy", 0.0)
-
-            # Save comparison to database
-            comparison_id = self.comparison_model.save_comparison(
-                portfolio_id=portfolio_id,
-                ticker=ticker,
-                predicted_data=prediction_data,
-                actual_data=actual_data,
-                comparison_metrics=comparison_metrics,
-                accuracy_score=accuracy_score,
-                prediction_date=datetime.fromisoformat(prediction_data.get("timestamp", datetime.now().isoformat())),
-                actual_date=datetime.now()
-            )
-
             return {
-                "success": True,
-                "comparison_id": comparison_id,
-                "accuracy_score": accuracy_score,
-                "comparison_metrics": comparison_metrics,
-                "predicted_data": prediction_data,
-                "actual_data": actual_data
+                "success": False,
+                "status": "unavailable",
+                "error": "Prediction comparison requires a matured historical observation; no actual observation was loaded.",
+                "ticker": ticker,
+                "days_ahead": days_ahead,
+                "prediction_date": prediction_data.get("timestamp"),
+                "as_of": end_date.isoformat(),
             }
 
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
-    def _calculate_comparison_metrics(self, predicted: Dict[str, Any],
-                                    actual: Dict[str, Any]) -> Dict[str, Any]:
+    def _calculate_comparison_metrics(
+        self, predicted: Dict[str, Any], actual: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Calculate comparison metrics between predicted and actual data"""
 
         metrics = {
@@ -966,19 +1225,17 @@ class ClariFiEngine:
             "direction_accuracy": 0.0,
             "volatility_accuracy": 0.0,
             "overall_accuracy": 0.0,
-            "comparison_date": datetime.now().isoformat()
+            "comparison_date": datetime.now().isoformat(),
         }
-
-        # This would implement actual comparison logic
-        # For now, return placeholder metrics
-        metrics["overall_accuracy"] = 0.75  # 75% accuracy placeholder
 
         return metrics
 
     # ------------------------------------------------------------------
     # Deep Analysis / Historical Chunk Backtesting
     # ------------------------------------------------------------------
-    def _run_deep_analysis(self, ticker: str, full_data: pd.DataFrame, chunk_months: int = 3) -> Dict[str, Any]:
+    def _run_deep_analysis(
+        self, ticker: str, full_data: pd.DataFrame, chunk_months: int = 3
+    ) -> Dict[str, Any]:
         """
         Perform rolling historical backtest to evaluate predictive indicators accuracy.
 
@@ -994,6 +1251,8 @@ class ClariFiEngine:
         """
         if full_data is None or full_data.empty:
             return {"error": "No data provided for deep analysis"}
+        if not isinstance(chunk_months, int) or chunk_months <= 0:
+            return {"error": "chunk_months must be a positive integer"}
 
         # Ensure chronological order
         data = full_data.sort_index().copy()
@@ -1001,9 +1260,9 @@ class ClariFiEngine:
         # Expect a DateTimeIndex; if not, try to convert
         if not isinstance(data.index, pd.DatetimeIndex):
             # Attempt to parse an index column
-            if 'Date' in data.columns:
-                data['Date'] = pd.to_datetime(data['Date'])
-                data = data.set_index('Date')
+            if "Date" in data.columns:
+                data["Date"] = pd.to_datetime(data["Date"])
+                data = data.set_index("Date")
             else:
                 try:
                     data.index = pd.to_datetime(data.index)
@@ -1011,7 +1270,7 @@ class ClariFiEngine:
                     return {"error": "Data does not have a valid datetime index"}
 
         # Basic price column selection
-        price_col = 'Close' if 'Close' in data.columns else data.columns[0]
+        price_col = "Close" if "Close" in data.columns else data.columns[0]
 
         # Determine rolling chunk boundaries
         start_date = data.index.min()
@@ -1026,9 +1285,25 @@ class ClariFiEngine:
         def add_months(dt: pd.Timestamp, months: int) -> pd.Timestamp:
             year = dt.year + (dt.month - 1 + months) // 12
             month = (dt.month - 1 + months) % 12 + 1
-            day = min(dt.day, [31,
-                               29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
-                               31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+            day = min(
+                dt.day,
+                [
+                    31,
+                    29
+                    if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+                    else 28,
+                    31,
+                    30,
+                    31,
+                    30,
+                    31,
+                    31,
+                    30,
+                    31,
+                    30,
+                    31,
+                ][month - 1],
+            )
             return pd.Timestamp(year=year, month=month, day=day)
 
         # Minimal length guard (need at least two chunks)
@@ -1040,7 +1315,9 @@ class ClariFiEngine:
             if chunk_end >= end_date:
                 break  # Need future data for evaluation
 
-            in_sample = data.loc[(data.index >= current_start) & (data.index < chunk_end)]
+            in_sample = data.loc[
+                (data.index >= current_start) & (data.index < chunk_end)
+            ]
             if in_sample.empty:
                 current_start = chunk_end
                 continue
@@ -1051,29 +1328,42 @@ class ClariFiEngine:
                 closes = in_sample[price_col]
                 x = np.arange(len(closes))
                 slope = 0.0
-                direction = 'FLAT'
+                direction = "FLAT"
                 if len(closes) > 1:
                     slope = np.polyfit(x, closes.values, 1)[0]
-                    direction = 'BULLISH' if slope > 0 else 'BEARISH' if slope < 0 else 'FLAT'
-                recent_return = (closes.iloc[-1] / closes.iloc[0] - 1) if len(closes) > 1 else 0.0
+                    direction = (
+                        "BULLISH" if slope > 0 else "BEARISH" if slope < 0 else "FLAT"
+                    )
+                recent_return = (
+                    (closes.iloc[-1] / closes.iloc[0] - 1) if len(closes) > 1 else 0.0
+                )
                 # Simple projection: assume continuation of average daily return over next chunk
                 avg_daily_ret = closes.pct_change().mean()
-                future_period_days = max(1, int((add_months(chunk_end, chunk_months) - chunk_end).days))
-                projected_change = (1 + avg_daily_ret) ** future_period_days - 1 if avg_daily_ret is not None else 0.0
+                future_period_days = max(
+                    1, int((add_months(chunk_end, chunk_months) - chunk_end).days)
+                )
+                projected_change = (
+                    (1 + avg_daily_ret) ** future_period_days - 1
+                    if avg_daily_ret is not None
+                    else 0.0
+                )
             except Exception as e:
-                chunk_results.append({
-                    "chunk_start": current_start.isoformat(),
-                    "chunk_end": chunk_end.isoformat(),
-                    "error": f"Indicator calculation failed: {str(e)}"
-                })
+                chunk_results.append(
+                    {
+                        "chunk_start": current_start.isoformat(),
+                        "chunk_end": chunk_end.isoformat(),
+                        "error": f"Indicator calculation failed: {str(e)}",
+                    }
+                )
                 current_start = chunk_end
                 continue
-
 
             # Actual future window for evaluation
             future_start = chunk_end
             future_end = add_months(chunk_end, chunk_months)
-            future_window = data.loc[(data.index >= future_start) & (data.index < future_end)]
+            future_window = data.loc[
+                (data.index >= future_start) & (data.index < future_end)
+            ]
             if future_window.empty:
                 break  # No future data left
 
@@ -1082,16 +1372,24 @@ class ClariFiEngine:
 
             # Coerce pandas Series/ndarray (one-row results) to scalar values
             try:
-                if isinstance(actual_future_price, (pd.Series, pd.DataFrame, np.ndarray)):
+                if isinstance(
+                    actual_future_price, (pd.Series, pd.DataFrame, np.ndarray)
+                ):
                     actual_future_price = actual_future_price.squeeze()
-                actual_future_price = float(actual_future_price) if pd.notna(actual_future_price) else None
+                actual_future_price = (
+                    float(actual_future_price)
+                    if pd.notna(actual_future_price)
+                    else None
+                )
             except Exception:
                 actual_future_price = None
 
             try:
                 if isinstance(reference_price, (pd.Series, pd.DataFrame, np.ndarray)):
                     reference_price = reference_price.squeeze()
-                reference_price = float(reference_price) if pd.notna(reference_price) else None
+                reference_price = (
+                    float(reference_price) if pd.notna(reference_price) else None
+                )
             except Exception:
                 reference_price = None
 
@@ -1102,16 +1400,23 @@ class ClariFiEngine:
                 if actual_future_price is None:
                     actual_change = 0.0
                 else:
-                    actual_change = (actual_future_price / reference_price - 1)
+                    actual_change = actual_future_price / reference_price - 1
 
-            actual_direction = 'BULLISH' if actual_change > 0 else 'BEARISH' if actual_change < 0 else 'FLAT'
-
+            actual_direction = (
+                "BULLISH"
+                if actual_change > 0
+                else "BEARISH"
+                if actual_change < 0
+                else "FLAT"
+            )
 
             # Ensure projected_change is a scalar (handle pandas Series/ndarray)
             try:
                 if isinstance(projected_change, (pd.Series, pd.DataFrame, np.ndarray)):
                     projected_change = projected_change.squeeze()
-                projected_change = float(projected_change) if pd.notna(projected_change) else None
+                projected_change = (
+                    float(projected_change) if pd.notna(projected_change) else None
+                )
             except Exception:
                 projected_change = None
 
@@ -1126,19 +1431,21 @@ class ClariFiEngine:
             norm_factor = max(0.0001, abs(actual_change) + 0.02)
             price_accuracy = max(0.0, 1 - price_change_error / norm_factor)
             direction_accuracy = 1.0 if direction == actual_direction else 0.0
-            chunk_results.append({
-                "chunk_start": current_start.isoformat(),
-                "chunk_end": chunk_end.isoformat(),
-                "evaluation_end": future_end.isoformat(),
-                "predicted_direction": direction,
-                "actual_direction": actual_direction,
-                "direction_accuracy": direction_accuracy,
-                "predicted_change_pct": projected_change * 100,
-                "actual_change_pct": actual_change * 100,
-                "price_accuracy": price_accuracy,
-                "slope": slope,
-                "recent_return_pct": recent_return * 100
-            })
+            chunk_results.append(
+                {
+                    "chunk_start": current_start.isoformat(),
+                    "chunk_end": chunk_end.isoformat(),
+                    "evaluation_end": future_end.isoformat(),
+                    "predicted_direction": direction,
+                    "actual_direction": actual_direction,
+                    "direction_accuracy": direction_accuracy,
+                    "predicted_change_pct": projected_change * 100,
+                    "actual_change_pct": actual_change * 100,
+                    "price_accuracy": price_accuracy,
+                    "slope": slope,
+                    "recent_return_pct": recent_return * 100,
+                }
+            )
 
             current_start = chunk_end
 
@@ -1148,30 +1455,33 @@ class ClariFiEngine:
         # Aggregate summary
         df_chunks = pd.DataFrame(chunk_results)
         coefficient_of_precision = float(
-            0.6 * df_chunks['price_accuracy'].mean() +
-            0.4 * df_chunks['direction_accuracy'].mean()
+            0.6 * df_chunks["price_accuracy"].mean()
+            + 0.4 * df_chunks["direction_accuracy"].mean()
         )
         summary = {
             "chunks_evaluated": int(len(df_chunks)),
-            "avg_price_accuracy": float(df_chunks['price_accuracy'].mean()),
-            "avg_direction_accuracy": float(df_chunks['direction_accuracy'].mean()),
+            "avg_price_accuracy": float(df_chunks["price_accuracy"].mean()),
+            "avg_direction_accuracy": float(df_chunks["direction_accuracy"].mean()),
             "coefficient_of_precision": coefficient_of_precision,
             "period_start": start_date.isoformat(),
             "period_end": end_date.isoformat(),
-            "chunk_months": chunk_months
+            "chunk_months": chunk_months,
+            "evaluation_methodology": "heuristic_drift_continuation",
+            "strategy_replayed": False,
+            "decision_support_only": True,
         }
 
-        return {
-            "ticker": ticker,
-            "summary": summary,
-            "chunks": chunk_results
-        }
+        return {"ticker": ticker, "summary": summary, "chunks": chunk_results}
 
-    def get_accuracy_trends(self, ticker: str = None, portfolio_id: str = None) -> Dict[str, Any]:
+    def get_accuracy_trends(
+        self, ticker: str = None, portfolio_id: str = None
+    ) -> Dict[str, Any]:
         """Get accuracy trends for model refinement"""
         return self.comparison_model.get_accuracy_trends(ticker, portfolio_id)
 
-    def portfolio_analysis(self, portfolio_id: str, period: str = "1y") -> Dict[str, Any]:
+    def portfolio_analysis(
+        self, portfolio_id: str, period: str = "1y"
+    ) -> Dict[str, Any]:
         """Analyze entire portfolio"""
 
         # Get portfolio tickers
@@ -1179,20 +1489,16 @@ class ClariFiEngine:
         tickers = [t["ticker"] for t in tickers_data]
 
         if not tickers:
-            return {
-                "success": False,
-                "error": "No tickers found in portfolio"
-            }
+            return {"success": False, "error": "No tickers found in portfolio"}
 
         # Run comprehensive analysis
         return self.comprehensive_analysis(
-            tickers=tickers,
-            portfolio_id=portfolio_id,
-            period=period
+            tickers=tickers, portfolio_id=portfolio_id, period=period
         )
 
-    def deep_comprehensive_analysis(self, tickers: List[str], period: str = "5y",
-                                    chunk_months: int = 3, **kwargs) -> Dict[str, Any]:
+    def deep_comprehensive_analysis(
+        self, tickers: List[str], period: str = "5y", chunk_months: int = 3, **kwargs
+    ) -> Dict[str, Any]:
         """
         Convenience wrapper to run comprehensive analysis with deep backtesting enabled.
 
@@ -1202,8 +1508,8 @@ class ClariFiEngine:
             chunk_months (int): Size of rolling evaluation chunk
             **kwargs: Other flags forwarded to comprehensive_analysis
         """
-        kwargs.setdefault('include_deep', True)
-        kwargs.setdefault('deep_chunk_months', chunk_months)
+        kwargs.setdefault("include_deep", True)
+        kwargs.setdefault("deep_chunk_months", chunk_months)
         return self.comprehensive_analysis(tickers=tickers, period=period, **kwargs)
 
     # ------------------------------------------------------------------
@@ -1213,13 +1519,15 @@ class ClariFiEngine:
         self,
         tickers: Optional[List[str]] = None,
         top_n: int = 10,
-        min_score: float = 40.0
+        min_score: float = 40.0,
     ) -> Dict[str, Any]:
         """
         Scouts and ranks the best intraday stocks using volume surge, gap, and volatility metrics.
         """
         start_time = time.time()
-        candidates = self.intraday_screener.scout_market(tickers=tickers, top_n=top_n, min_score=min_score)
+        candidates = self.intraday_screener.scout_market(
+            tickers=tickers, top_n=top_n, min_score=min_score
+        )
         candidates_data = [c.to_dict() for c in candidates]
 
         return {
@@ -1227,13 +1535,11 @@ class ClariFiEngine:
             "count": len(candidates_data),
             "candidates": candidates_data,
             "execution_time": round(time.time() - start_time, 2),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     def generate_intraday_strategies(
-        self,
-        tickers: List[str],
-        profile: str = "BOTH"
+        self, tickers: List[str], profile: str = "BOTH"
     ) -> Dict[str, Any]:
         """
         Generates High-Risk and Low-Risk intraday strategies for given tickers.
@@ -1252,7 +1558,7 @@ class ClariFiEngine:
             "count": len(reports),
             "reports": reports,
             "execution_time": round(time.time() - start_time, 2),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     def create_intraday_monitor(
@@ -1261,7 +1567,7 @@ class ClariFiEngine:
         profile: str = "BOTH",
         poll_interval: int = 10,
         enable_shadow: bool = True,
-        agent: Optional[AutonomousIntradayAgent] = None
+        agent: Optional[AutonomousIntradayAgent] = None,
     ) -> IntradayLoopMonitor:
         """
         Creates and configures an IntradayLoopMonitor for real-time tracking.
@@ -1273,8 +1579,7 @@ class ClariFiEngine:
             strategy_gen=self.intraday_strategy_generator,
             agent=agent or self.intraday_agent,
             poll_interval_seconds=poll_interval,
-            enable_shadow_trading=enable_shadow
+            enable_shadow_trading=enable_shadow,
         )
         monitor.add_stocks(tickers, profile=profile)
         return monitor
-

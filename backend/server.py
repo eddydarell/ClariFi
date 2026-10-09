@@ -13,7 +13,14 @@ import asyncio
 import json
 import traceback
 import pandas as pd
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    BackgroundTasks,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # Add engine to path
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from core.engine import ClariFiEngine
 from core.stock_screener import StockScreener
 from core.strategy_analyzer import StrategyAnalyzer
@@ -35,12 +42,13 @@ from core.recommendation_validation import (
     validate_trade_plan,
 )
 from core.result_schema import envelope, error_item, to_jsonable
+from core.momentum_strategy import MomentumConfig
 
 # Initialize FastAPI app
 app = FastAPI(
     title="ClariFi API",
     description="Advanced Market Intelligence & Pattern Analysis API",
-    version="2.0.0"
+    version="2.0.0",
 )
 
 # Add CORS middleware
@@ -66,10 +74,12 @@ class PortfolioCreate(BaseModel):
     name: str = Field(..., description="Portfolio name")
     description: str = Field("", description="Portfolio description")
 
+
 class TickerAdd(BaseModel):
     ticker: str = Field(..., description="Stock ticker symbol")
     quantity: float = Field(0.0, description="Number of shares")
     avg_cost: float = Field(0.0, description="Average cost per share")
+
 
 class AnalysisRequest(BaseModel):
     tickers: List[str] = Field(..., description="List of ticker symbols")
@@ -80,13 +90,17 @@ class AnalysisRequest(BaseModel):
     include_options: bool = Field(True, description="Include options analysis")
     include_seasonal: bool = Field(True, description="Include seasonal analysis")
 
+
 class ComparisonRequest(BaseModel):
     ticker: str = Field(..., description="Ticker symbol")
     portfolio_id: Optional[str] = Field(None, description="Portfolio ID")
     days_ahead: int = Field(30, description="Days to compare")
 
+
 class ScreenerRequest(BaseModel):
-    category: str = Field("gainers", description="Screening category: gainers, losers, actives, new")
+    category: str = Field(
+        "gainers", description="Screening category: gainers, losers, actives, new"
+    )
     limit: int = Field(20, description="Number of results")
 
 
@@ -105,17 +119,35 @@ class ComprehensiveV1Request(BaseModel):
     include_seasonal: bool = True
     include_ml: bool = False
     include_deep: bool = False
+    deep_chunk_months: int = Field(3, ge=1, le=24)
+
+
+class MomentumRequest(BaseModel):
+    tickers: Optional[List[str]] = Field(None, max_length=276)
+    period: str = Field(
+        "5y", description="Historical period used for signals and backtest"
+    )
+    run_backtest: bool = True
+    maximum_positions: int = Field(20, ge=1, le=100)
+    one_way_cost_bps: float = Field(10.0, ge=0, le=500)
+    entry_percentile: float = Field(0.90, gt=0, le=1)
+    retention_percentile: float = Field(0.70, gt=0, le=1)
+    target_portfolio_volatility: float = Field(0.12, gt=0, le=2)
+
 
 class StrategyRequest(BaseModel):
     ticker: str = Field(..., description="Ticker symbol")
     period: str = Field("1y", description="Analysis period")
     evidence_threshold: int = Field(
-        2, ge=0, le=10,
+        2,
+        ge=0,
+        le=10,
         description="Minimum independent signals required before BUY or SELL is actionable",
     )
     minimum_walk_forward_observations: int = Field(3, ge=1, le=100)
     minimum_directional_accuracy: float = Field(0.55, ge=0.5, le=1.0)
     max_data_age_days: int = Field(7, ge=0, le=30)
+
 
 class MonitorRequest(BaseModel):
     tickers: List[str] = Field(..., description="List of tickers to monitor")
@@ -127,6 +159,7 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+
 # Portfolio endpoints
 @app.post("/api/portfolios")
 async def create_portfolio(portfolio: PortfolioCreate):
@@ -134,11 +167,16 @@ async def create_portfolio(portfolio: PortfolioCreate):
     try:
         result = engine.create_portfolio(portfolio.name, portfolio.description)
         if result["success"]:
-            return {"success": True, "portfolio_id": result["portfolio_id"], "message": result["message"]}
+            return {
+                "success": True,
+                "portfolio_id": result["portfolio_id"],
+                "message": result["message"],
+            }
         else:
             raise HTTPException(status_code=400, detail=result["message"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/portfolios")
 async def get_portfolios():
@@ -148,6 +186,7 @@ async def get_portfolios():
         return {"success": True, "portfolios": portfolios}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/portfolios/{portfolio_id}")
 async def get_portfolio(portfolio_id: str):
@@ -163,15 +202,13 @@ async def get_portfolio(portfolio_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/portfolios/{portfolio_id}/tickers")
 async def add_ticker_to_portfolio(portfolio_id: str, ticker_data: TickerAdd):
     """Add ticker to portfolio"""
     try:
         result = engine.add_ticker_to_portfolio(
-            portfolio_id,
-            ticker_data.ticker,
-            ticker_data.quantity,
-            ticker_data.avg_cost
+            portfolio_id, ticker_data.ticker, ticker_data.quantity, ticker_data.avg_cost
         )
         if result["success"]:
             return result
@@ -179,6 +216,7 @@ async def add_ticker_to_portfolio(portfolio_id: str, ticker_data: TickerAdd):
             raise HTTPException(status_code=400, detail=result["message"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/portfolios/{portfolio_id}/tickers/{ticker}")
 async def remove_ticker_from_portfolio(portfolio_id: str, ticker: str):
@@ -192,6 +230,7 @@ async def remove_ticker_from_portfolio(portfolio_id: str, ticker: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/portfolios/{portfolio_id}/tickers")
 async def get_portfolio_tickers(portfolio_id: str):
     """Get all tickers in portfolio"""
@@ -200,6 +239,7 @@ async def get_portfolio_tickers(portfolio_id: str):
         return {"success": True, "tickers": tickers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/portfolios/{portfolio_id}/info")
 async def get_portfolio_info(portfolio_id: str):
@@ -213,6 +253,7 @@ async def get_portfolio_info(portfolio_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/portfolios/{portfolio_id}/analytics")
 async def get_portfolio_analytics(portfolio_id: str):
     """Get advanced portfolio analytics including risk distribution and performance trends"""
@@ -225,8 +266,11 @@ async def get_portfolio_analytics(portfolio_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/analysis/comprehensive")
-async def run_comprehensive_analysis(analysis_request: AnalysisRequest, background_tasks: BackgroundTasks):
+async def run_comprehensive_analysis(
+    analysis_request: AnalysisRequest, background_tasks: BackgroundTasks
+):
     """Run comprehensive analysis on tickers"""
     try:
         # For long-running analysis, you might want to run it in background
@@ -239,7 +283,7 @@ async def run_comprehensive_analysis(analysis_request: AnalysisRequest, backgrou
             include_events=analysis_request.include_events,
             include_options=analysis_request.include_options,
             include_seasonal=analysis_request.include_seasonal,
-            save_to_db=False  # Disable database save to avoid pandas serialization issues
+            save_to_db=False,  # Disable database save to avoid pandas serialization issues
         )
         print(f"Analysis result: {result}")
 
@@ -250,6 +294,7 @@ async def run_comprehensive_analysis(analysis_request: AnalysisRequest, backgrou
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/analysis/portfolio/{portfolio_id}")
 async def analyze_portfolio(portfolio_id: str, period: str = "1y"):
     """Analyze entire portfolio"""
@@ -259,14 +304,18 @@ async def analyze_portfolio(portfolio_id: str, period: str = "1y"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/analysis/history")
-async def get_analysis_history(ticker: Optional[str] = None, portfolio_id: Optional[str] = None, limit: int = 20):
+async def get_analysis_history(
+    ticker: Optional[str] = None, portfolio_id: Optional[str] = None, limit: int = 20
+):
     """Get analysis history"""
     try:
         history = engine.get_analysis_history(ticker, portfolio_id, limit)
         return {"success": True, "history": history}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/analysis/compare")
 async def compare_predictions(comparison_request: ComparisonRequest):
@@ -275,20 +324,24 @@ async def compare_predictions(comparison_request: ComparisonRequest):
         result = engine.compare_predictions_vs_actual(
             ticker=comparison_request.ticker,
             portfolio_id=comparison_request.portfolio_id,
-            days_ahead=comparison_request.days_ahead
+            days_ahead=comparison_request.days_ahead,
         )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/analysis/accuracy-trends")
-async def get_accuracy_trends(ticker: Optional[str] = None, portfolio_id: Optional[str] = None):
+async def get_accuracy_trends(
+    ticker: Optional[str] = None, portfolio_id: Optional[str] = None
+):
     """Get accuracy trends for model refinement"""
     try:
         trends = engine.get_accuracy_trends(ticker, portfolio_id)
         return {"success": True, "trends": trends}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Command history endpoint
 @app.get("/api/commands/history")
@@ -300,30 +353,38 @@ async def get_command_history(limit: int = 50):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # Screener Endpoints
 @app.post("/api/screener")
 async def screen_market(request: ScreenerRequest):
     """Screen the market for stocks"""
     try:
-        results = screener.screen_market(request.category, request.limit, json_output=True)
+        results = screener.screen_market(
+            request.category, request.limit, json_output=True
+        )
         return {"success": True, "data": engine._make_json_serializable(results)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Strategy Endpoints
 @app.post("/api/strategy")
 async def generate_strategy(request: StrategyRequest):
     """Generate investment strategy for a ticker"""
     try:
-        stock_data = engine.downloader.download_stock_data(request.ticker, period=request.period)
-        
+        stock_data = engine.downloader.download_stock_data(
+            request.ticker, period=request.period
+        )
+
         if stock_data is None or stock_data.empty:
-             raise HTTPException(status_code=404, detail=f"No data found for {request.ticker}")
+            raise HTTPException(
+                status_code=404, detail=f"No data found for {request.ticker}"
+            )
 
         data_quality = validate_market_data(stock_data, request.max_data_age_days)
-        if not data_quality['valid']:
+        if not data_quality["valid"]:
             strategy = strategy_analyzer.create_suppressed_strategy(
-                request.ticker, data_quality['reasons'], data_quality.get('data_as_of')
+                request.ticker, data_quality["reasons"], data_quality.get("data_as_of")
             )
             return {
                 "success": True,
@@ -339,17 +400,37 @@ async def generate_strategy(request: StrategyRequest):
             engine.pattern_analyzer.add_technical_indicators(stock_data, validate=False)
             last_row = stock_data.iloc[-1]
             technical_indicators = {
-                'RSI_14': float(last_row['RSI_14']) if 'RSI_14' in last_row and not pd.isna(last_row['RSI_14']) else None,
-                'MACD': float(last_row['MACD']) if 'MACD' in last_row and not pd.isna(last_row['MACD']) else None,
-                'MACD_Signal': float(last_row['MACD_Signal']) if 'MACD_Signal' in last_row and not pd.isna(last_row['MACD_Signal']) else None,
-                'ADX': float(last_row['ADX']) if 'ADX' in last_row and not pd.isna(last_row['ADX']) else None,
-                'Williams_%R': float(last_row['Williams_%R']) if 'Williams_%R' in last_row and not pd.isna(last_row['Williams_%R']) else None,
-                'CCI': float(last_row['CCI']) if 'CCI' in last_row and not pd.isna(last_row['CCI']) else None,
-                'BB_Upper': float(last_row['BB_Upper']) if 'BB_Upper' in last_row and not pd.isna(last_row['BB_Upper']) else None,
-                'BB_Lower': float(last_row['BB_Lower']) if 'BB_Lower' in last_row and not pd.isna(last_row['BB_Lower']) else None,
-                'BB_Middle': float(last_row['BB_Middle']) if 'BB_Middle' in last_row and not pd.isna(last_row['BB_Middle']) else None,
-                'BB_Width': float(last_row['BB_Width']) if 'BB_Width' in last_row and not pd.isna(last_row['BB_Width']) else None,
-                '_last_close': float(last_row['Close']),
+                "RSI_14": float(last_row["RSI_14"])
+                if "RSI_14" in last_row and not pd.isna(last_row["RSI_14"])
+                else None,
+                "MACD": float(last_row["MACD"])
+                if "MACD" in last_row and not pd.isna(last_row["MACD"])
+                else None,
+                "MACD_Signal": float(last_row["MACD_Signal"])
+                if "MACD_Signal" in last_row and not pd.isna(last_row["MACD_Signal"])
+                else None,
+                "ADX": float(last_row["ADX"])
+                if "ADX" in last_row and not pd.isna(last_row["ADX"])
+                else None,
+                "Williams_%R": float(last_row["Williams_%R"])
+                if "Williams_%R" in last_row and not pd.isna(last_row["Williams_%R"])
+                else None,
+                "CCI": float(last_row["CCI"])
+                if "CCI" in last_row and not pd.isna(last_row["CCI"])
+                else None,
+                "BB_Upper": float(last_row["BB_Upper"])
+                if "BB_Upper" in last_row and not pd.isna(last_row["BB_Upper"])
+                else None,
+                "BB_Lower": float(last_row["BB_Lower"])
+                if "BB_Lower" in last_row and not pd.isna(last_row["BB_Lower"])
+                else None,
+                "BB_Middle": float(last_row["BB_Middle"])
+                if "BB_Middle" in last_row and not pd.isna(last_row["BB_Middle"])
+                else None,
+                "BB_Width": float(last_row["BB_Width"])
+                if "BB_Width" in last_row and not pd.isna(last_row["BB_Width"])
+                else None,
+                "_last_close": float(last_row["Close"]),
             }
         except Exception as e:
             print(f"Warning: Failed to compute technical indicators: {e}")
@@ -381,20 +462,23 @@ async def generate_strategy(request: StrategyRequest):
         )
         strategy.trade_plan_validation = validate_trade_plan(strategy)
         provenance = {
-            'decision_status': strategy.decision_status,
-            'evidence_tags': strategy.evidence_tags,
-            'data_quality': data_quality,
-            'empirical_validation': strategy.empirical_validation,
-            'trade_plan_validation': strategy.trade_plan_validation,
-            'policy_version': 'swing-v1',
+            "decision_status": strategy.decision_status,
+            "evidence_tags": strategy.evidence_tags,
+            "data_quality": data_quality,
+            "empirical_validation": strategy.empirical_validation,
+            "trade_plan_validation": strategy.trade_plan_validation,
+            "policy_version": "swing-v1",
         }
-        
+
         import dataclasses
+
         strategy_dict = dataclasses.asdict(strategy)
 
         try:
             prediction_tracking = prediction_tracker.process_run(
-                ticker=request.ticker, entry_price=strategy.entry_price, predictions=strategy.predictions,
+                ticker=request.ticker,
+                entry_price=strategy.entry_price,
+                predictions=strategy.predictions,
                 provenance=provenance,
             )
         except Exception as e:
@@ -403,7 +487,7 @@ async def generate_strategy(request: StrategyRequest):
 
         try:
             shadow_trade_tracking = shadow_trade_tracker.process_strategy(
-                request.ticker, strategy, data_quality['data_as_of'], provenance
+                request.ticker, strategy, data_quality["data_as_of"], provenance
             )
         except Exception as e:
             print(f"Warning: shadow trade tracking failed: {e}")
@@ -412,8 +496,14 @@ async def generate_strategy(request: StrategyRequest):
         return {
             "success": True,
             "strategy": engine._make_json_serializable(strategy_dict),
-            "prediction_tracking": engine._make_json_serializable(prediction_tracking) if prediction_tracking else None,
-            "shadow_trade_tracking": engine._make_json_serializable(shadow_trade_tracking) if shadow_trade_tracking else None,
+            "prediction_tracking": engine._make_json_serializable(prediction_tracking)
+            if prediction_tracking
+            else None,
+            "shadow_trade_tracking": engine._make_json_serializable(
+                shadow_trade_tracking
+            )
+            if shadow_trade_tracking
+            else None,
             "decision_support_only": True,
         }
 
@@ -432,55 +522,96 @@ async def generate_predictions_v1(request: PredictionRequest):
     try:
         if any(h < 1 or h > 252 for h in request.horizons):
             raise ValueError("horizons must be between 1 and 252 trading days")
-        stock_data = engine.downloader.download_stock_data(ticker, period=request.period)
+        stock_data = engine.downloader.download_stock_data(
+            ticker, period=request.period
+        )
         if stock_data is None or stock_data.empty:
-            return envelope("prediction.forecast", errors=[error_item(
-                f"No market data found for {ticker}", "NO_DATA", "forecast", ticker
-            )], meta={"ticker": ticker})
+            return envelope(
+                "prediction.forecast",
+                errors=[
+                    error_item(
+                        f"No market data found for {ticker}",
+                        "NO_DATA",
+                        "forecast",
+                        ticker,
+                    )
+                ],
+                meta={"ticker": ticker},
+            )
         result = forecast_prices(stock_data, ticker, tuple(request.horizons))
-        return envelope("prediction.forecast", result, meta={
-            "ticker": ticker,
-            "period": request.period,
-            "horizons": request.horizons,
-            "data_as_of": result["as_of"],
-        })
+        return envelope(
+            "prediction.forecast",
+            result,
+            meta={
+                "ticker": ticker,
+                "period": request.period,
+                "horizons": request.horizons,
+                "data_as_of": result["as_of"],
+            },
+        )
     except ValueError as exc:
-        return envelope("prediction.forecast", errors=[error_item(str(exc), "INVALID_INPUT", "forecast", ticker)])
+        return envelope(
+            "prediction.forecast",
+            errors=[error_item(str(exc), "INVALID_INPUT", "forecast", ticker)],
+        )
     except Exception as exc:
         traceback.print_exc()
-        return envelope("prediction.forecast", errors=[error_item(
-            str(exc), "PREDICTION_FAILED", "forecast", ticker, retryable=True
-        )])
+        return envelope(
+            "prediction.forecast",
+            errors=[
+                error_item(
+                    str(exc), "PREDICTION_FAILED", "forecast", ticker, retryable=True
+                )
+            ],
+        )
 
 
 @app.post("/api/v1/strategy")
 async def generate_strategy_v1(request: StrategyRequest):
     """Canonical wrapper around the existing explainable strategy analysis."""
     try:
-        stock_data = engine.downloader.download_stock_data(request.ticker.strip().upper(), period=request.period)
+        stock_data = engine.downloader.download_stock_data(
+            request.ticker.strip().upper(), period=request.period
+        )
         if stock_data is None or stock_data.empty:
-            return envelope("strategy.generate", errors=[error_item(
-                "No market data found", "NO_DATA", "strategy", request.ticker
-            )])
-        data_quality = validate_market_data(stock_data, request.max_data_age_days)
-        if not data_quality['valid']:
-            strategy = strategy_analyzer.create_suppressed_strategy(
-                request.ticker.strip().upper(), data_quality['reasons'], data_quality.get('data_as_of')
+            return envelope(
+                "strategy.generate",
+                errors=[
+                    error_item(
+                        "No market data found", "NO_DATA", "strategy", request.ticker
+                    )
+                ],
             )
-            return envelope("strategy.generate", {"strategy": strategy, "prediction_tracking": None}, meta={
-                "ticker": request.ticker.upper(),
-                "decision_support_only": True,
-                "data_quality": data_quality,
-            })
+        data_quality = validate_market_data(stock_data, request.max_data_age_days)
+        if not data_quality["valid"]:
+            strategy = strategy_analyzer.create_suppressed_strategy(
+                request.ticker.strip().upper(),
+                data_quality["reasons"],
+                data_quality.get("data_as_of"),
+            )
+            return envelope(
+                "strategy.generate",
+                {"strategy": strategy, "prediction_tracking": None},
+                meta={
+                    "ticker": request.ticker.upper(),
+                    "decision_support_only": True,
+                    "data_quality": data_quality,
+                },
+            )
         technical_indicators = {"_last_close": float(stock_data["Close"].iloc[-1])}
         seasonal = engine.seasonal_analyzer.analyze(stock_data)
         strategy = strategy_analyzer.generate_strategy(
-            ticker=request.ticker.strip().upper(), data=stock_data, period=request.period,
-            seasonal_analysis=seasonal, technical_indicators=technical_indicators,
+            ticker=request.ticker.strip().upper(),
+            data=stock_data,
+            period=request.period,
+            seasonal_analysis=seasonal,
+            technical_indicators=technical_indicators,
             find_optimum=True,
             evidence_threshold=request.evidence_threshold,
         )
-        forecast = forecast_prices(stock_data, request.ticker.strip().upper(), (5, 20, 60))
+        forecast = forecast_prices(
+            stock_data, request.ticker.strip().upper(), (5, 20, 60)
+        )
         strategy.empirical_validation = validate_forecast_evidence(
             strategy,
             forecast,
@@ -489,43 +620,54 @@ async def generate_strategy_v1(request: StrategyRequest):
         )
         strategy.trade_plan_validation = validate_trade_plan(strategy)
         provenance = {
-            'decision_status': strategy.decision_status,
-            'evidence_tags': strategy.evidence_tags,
-            'data_quality': data_quality,
-            'empirical_validation': strategy.empirical_validation,
-            'trade_plan_validation': strategy.trade_plan_validation,
-            'policy_version': 'swing-v1',
+            "decision_status": strategy.decision_status,
+            "evidence_tags": strategy.evidence_tags,
+            "data_quality": data_quality,
+            "empirical_validation": strategy.empirical_validation,
+            "trade_plan_validation": strategy.trade_plan_validation,
+            "policy_version": "swing-v1",
         }
         try:
             prediction_tracking = prediction_tracker.process_run(
-                ticker=request.ticker.strip().upper(), entry_price=strategy.entry_price,
-                predictions=strategy.predictions, provenance=provenance,
+                ticker=request.ticker.strip().upper(),
+                entry_price=strategy.entry_price,
+                predictions=strategy.predictions,
+                provenance=provenance,
             )
         except Exception as e:
             print(f"Warning: prediction tracking failed: {e}")
             prediction_tracking = None
         try:
             shadow_trade_tracking = shadow_trade_tracker.process_strategy(
-                request.ticker.strip().upper(), strategy, data_quality['data_as_of'], provenance
+                request.ticker.strip().upper(),
+                strategy,
+                data_quality["data_as_of"],
+                provenance,
             )
         except Exception as e:
             print(f"Warning: shadow trade tracking failed: {e}")
             shadow_trade_tracking = None
-        return envelope("strategy.generate", {
-            "strategy": strategy,
-            "prediction_tracking": prediction_tracking,
-            "shadow_trade_tracking": shadow_trade_tracking,
-        },
-                       meta={
-                           "ticker": request.ticker.upper(),
-                           "decision_support_only": True,
-                           "evidence_threshold": request.evidence_threshold,
-                       })
+        return envelope(
+            "strategy.generate",
+            {
+                "strategy": strategy,
+                "prediction_tracking": prediction_tracking,
+                "shadow_trade_tracking": shadow_trade_tracking,
+            },
+            meta={
+                "ticker": request.ticker.upper(),
+                "decision_support_only": True,
+                "evidence_threshold": request.evidence_threshold,
+            },
+        )
     except Exception as exc:
         traceback.print_exc()
-        return envelope("strategy.generate", errors=[error_item(
-            str(exc), "STRATEGY_FAILED", "strategy", request.ticker
-        )])
+        return envelope(
+            "strategy.generate",
+            errors=[
+                error_item(str(exc), "STRATEGY_FAILED", "strategy", request.ticker)
+            ],
+        )
 
 
 @app.post("/api/v1/screener")
@@ -534,9 +676,13 @@ async def screen_market_v1(request: ScreenerRequest):
     category = request.category if request.category != "active" else "actives"
     try:
         result = screener.screen_market(category, request.limit, json_output=True)
-        return envelope("market.screen", result, meta={"category": category, "limit": request.limit})
+        return envelope(
+            "market.screen", result, meta={"category": category, "limit": request.limit}
+        )
     except Exception as exc:
-        return envelope("market.screen", errors=[error_item(str(exc), "SCREEN_FAILED", "screener")])
+        return envelope(
+            "market.screen", errors=[error_item(str(exc), "SCREEN_FAILED", "screener")]
+        )
 
 
 @app.post("/api/v1/analysis/comprehensive")
@@ -544,9 +690,14 @@ async def comprehensive_analysis_v1(request: ComprehensiveV1Request):
     """Expose all existing checks through one versioned, JSON-safe contract."""
     tickers = [ticker.strip().upper() for ticker in request.tickers if ticker.strip()]
     if not tickers:
-        return envelope("analysis.comprehensive", errors=[error_item(
-            "At least one ticker is required", "INVALID_INPUT", "analysis"
-        )])
+        return envelope(
+            "analysis.comprehensive",
+            errors=[
+                error_item(
+                    "At least one ticker is required", "INVALID_INPUT", "analysis"
+                )
+            ],
+        )
     try:
         result = engine.comprehensive_analysis(
             tickers=tickers,
@@ -558,35 +709,99 @@ async def comprehensive_analysis_v1(request: ComprehensiveV1Request):
             include_seasonal=request.include_seasonal,
             include_ml=request.include_ml,
             include_deep=request.include_deep,
+            deep_chunk_months=request.deep_chunk_months,
         )
-        return envelope("analysis.comprehensive", result, meta={"tickers": tickers, "period": request.period})
+        return envelope(
+            "analysis.comprehensive",
+            result,
+            meta={"tickers": tickers, "period": request.period},
+        )
     except Exception as exc:
         traceback.print_exc()
-        return envelope("analysis.comprehensive", errors=[error_item(
-            str(exc), "ANALYSIS_FAILED", "analysis", retryable=True
-        )])
+        return envelope(
+            "analysis.comprehensive",
+            errors=[
+                error_item(str(exc), "ANALYSIS_FAILED", "analysis", retryable=True)
+            ],
+        )
+
+
+@app.post("/api/v1/strategies/momentum")
+async def momentum_strategy_v1(request: MomentumRequest):
+    """Run point-in-time cross-sectional momentum research."""
+    if request.retention_percentile > request.entry_percentile:
+        return envelope(
+            "strategy.momentum",
+            errors=[
+                error_item(
+                    "retention_percentile must not exceed entry_percentile",
+                    "INVALID_INPUT",
+                    "momentum",
+                )
+            ],
+        )
+    try:
+        config = MomentumConfig(
+            maximum_positions=request.maximum_positions,
+            one_way_cost_bps=request.one_way_cost_bps,
+            entry_percentile=request.entry_percentile,
+            retention_percentile=request.retention_percentile,
+            target_portfolio_volatility=request.target_portfolio_volatility,
+        )
+        result = engine.momentum_analysis(
+            tickers=request.tickers,
+            period=request.period,
+            config=config,
+            run_backtest=request.run_backtest,
+        )
+        errors = [
+            error_item(message, "MOMENTUM_DATA", ticker)
+            for ticker, message in result.get("errors", {}).items()
+        ]
+        return envelope(
+            "strategy.momentum",
+            result,
+            errors=errors,
+            meta={"period": request.period, "decision_support_only": True},
+        )
+    except ValueError as exc:
+        return envelope(
+            "strategy.momentum",
+            errors=[error_item(str(exc), "INVALID_INPUT", "momentum")],
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        return envelope(
+            "strategy.momentum",
+            errors=[
+                error_item(str(exc), "MOMENTUM_FAILED", "momentum", retryable=True)
+            ],
+        )
+
 
 # Live Monitor Endpoints
 monitoring_active = False
+
 
 @app.post("/api/live-monitor/start")
 async def start_monitoring(request: MonitorRequest, background_tasks: BackgroundTasks):
     """Start live monitoring"""
     global monitoring_active
-    
+
     if monitoring_active:
         # Update tickers if already running
         live_monitor.add_tickers(request.tickers)
         return {"success": True, "message": "Updated monitored tickers"}
-    
+
     live_monitor.add_tickers(request.tickers)
     monitoring_active = True
-    
-    # We don't start a blocking loop here. 
+
+    # We don't start a blocking loop here.
     # Instead, the WebSocket endpoint or a background task will handle updates.
     # For this architecture, we'll use the WebSocket to drive updates when clients are connected.
-    
+
     return {"success": True, "message": "Monitoring configured"}
+
 
 @app.post("/api/live-monitor/stop")
 async def stop_monitoring():
@@ -597,7 +812,9 @@ async def stop_monitoring():
 
 
 # Static file serving for the active lowercase frontend.
-frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "clarifi", "dist")
+frontend_dir = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "clarifi", "dist"
+)
 
 
 # Serve static assets (Vite build)
@@ -608,12 +825,21 @@ async def get_favicon():
         return FileResponse(favicon_path, media_type="image/x-icon")
     return Response(status_code=204)
 
+
 # Mount Vite assets and compatibility static path
 try:
     # Vite build places hashed assets under /assets
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(frontend_dir, "assets")),
+        name="assets",
+    )
     # Also provide /static for older clients
-    app.mount("/static", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="static")
+    app.mount(
+        "/static",
+        StaticFiles(directory=os.path.join(frontend_dir, "assets")),
+        name="static",
+    )
 except Exception as e:
     print(f"Warning: Could not mount static files: {e}")
 
@@ -625,7 +851,11 @@ async def serve_frontend():
     if os.path.exists(frontend_path):
         return FileResponse(frontend_path)
     else:
-        return {"message": "ClariFi API is running", "docs": "/docs", "frontend": "Not built yet"}
+        return {
+            "message": "ClariFi API is running",
+            "docs": "/docs",
+            "frontend": "Not built yet",
+        }
 
 
 @app.get("/{path:path}")
@@ -646,8 +876,10 @@ async def get_vite_svg():
         return FileResponse(vite_path, media_type="image/svg+xml")
     return Response(status_code=204)
 
+
 # WebSocket endpoint for real-time updates (optional)
 from fastapi import WebSocket, WebSocketDisconnect
+
 
 class ConnectionManager:
     """Manages WebSocket connections"""
@@ -669,7 +901,9 @@ class ConnectionManager:
         for connection in self.active_connections:
             await connection.send_text(message)
 
+
 manager = ConnectionManager()
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -687,19 +921,21 @@ async def websocket_endpoint(websocket: WebSocket):
             except asyncio.TimeoutError:
                 # No message from client, check if we need to send updates
                 pass
-            
+
             # If monitoring is active, fetch and send updates
             if monitoring_active and live_monitor.tickers:
                 try:
                     updates = live_monitor.fetch_updates()
                     if updates:
-                        await manager.broadcast(json.dumps({"type": "price_update", "data": updates}))
+                        await manager.broadcast(
+                            json.dumps({"type": "price_update", "data": updates})
+                        )
                 except Exception as e:
                     print(f"Error fetching updates: {e}")
-                
+
                 # Wait a bit to avoid flooding
                 await asyncio.sleep(2)
-                
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -707,13 +943,14 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
-
 def run_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = True):
     """Run the FastAPI server"""
     uvicorn.run("server:app", host=host, port=port, reload=reload)
 
+
 if __name__ == "__main__":
     import sys
+
     port = 8000
     host = "0.0.0.0"
     # Allow: python server.py --port 8181

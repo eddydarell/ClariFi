@@ -131,7 +131,6 @@ class AutonomousIntradayAgent:
         return self._dispatch_decision(decision, ctx)
 
     def _rule_based_evaluate(self, ctx: IntradayAgentContext) -> AgentDecision:
-        now = datetime.now()
         plan = ctx.active_plan
         price = ctx.current_price
 
@@ -150,10 +149,45 @@ class AutonomousIntradayAgent:
                 ],
             )
 
+        # Never open a new position after the flat deadline. The old logic
+        # only handled already-entered positions and could open at the close.
+        if ctx.position_status == "WATCHING" and ctx.minutes_to_eod_close <= 5:
+            return AgentDecision(
+                action="HOLD",
+                ticker=ctx.ticker,
+                risk_profile=plan.risk_profile if plan else "NONE",
+                confidence=0.99,
+                suggested_price=price,
+                reasoning=[
+                    "New entries are blocked within five minutes of the mandatory flat time"
+                ],
+            )
+
         # 2. Position is in WATCHING state: Evaluate Morning Entry Criteria
         if ctx.position_status == "WATCHING" and plan:
             # Check if within morning entry window
             profile_to_use = plan.risk_profile
+
+            try:
+                current_minutes = int(ctx.current_time_str[:2]) * 60 + int(
+                    ctx.current_time_str[3:5]
+                )
+            except (TypeError, ValueError):
+                current_minutes = -1
+            window_start, window_end = (
+                (570, 645) if profile_to_use == "HIGH_RISK" else (585, 690)
+            )
+            if current_minutes < window_start or current_minutes > window_end:
+                return AgentDecision(
+                    action="HOLD",
+                    ticker=ctx.ticker,
+                    risk_profile=profile_to_use,
+                    confidence=0.90,
+                    suggested_price=price,
+                    reasoning=[
+                        f"Entry blocked outside {window_start // 60:02d}:{window_start % 60:02d}-{window_end // 60:02d}:{window_end % 60:02d} ET window"
+                    ],
+                )
 
             # Entry Trigger Checks
             can_enter = False
@@ -161,16 +195,31 @@ class AutonomousIntradayAgent:
 
             if profile_to_use == "HIGH_RISK":
                 # Breakout trigger: price holding above entry condition level & strong volume
-                if price >= plan.entry_price and ctx.rvol >= 1.2:
+                trigger_met = (
+                    price >= plan.entry_price
+                    if plan.direction == "LONG"
+                    else price <= plan.entry_price
+                )
+                if trigger_met and ctx.rvol >= 1.2:
                     can_enter = True
                     reasons = [
-                        f"Morning breakout confirmed: ${price:.2f} >= ${plan.entry_price:.2f}",
+                        f"Morning {plan.direction.lower()} breakout confirmed at ${price:.2f}",
                         f"Relative Volume confirmation (RVOL: {ctx.rvol:.2f}x)",
                         f"Favorable Risk/Reward ratio: {plan.risk_reward_ratio:.2f}x",
                     ]
             else:
                 # Low risk trigger: VWAP bounce / EMA hold with positive posture
-                if ctx.vwap_distance_pct >= -0.5 and price >= plan.stop_loss_price:
+                trigger_met = (
+                    ctx.vwap_distance_pct >= -0.5
+                    if plan.direction == "LONG"
+                    else ctx.vwap_distance_pct <= 0.5
+                )
+                stop_safe = (
+                    price >= plan.stop_loss_price
+                    if plan.direction == "LONG"
+                    else price <= plan.stop_loss_price
+                )
+                if trigger_met and stop_safe:
                     can_enter = True
                     reasons = [
                         f"Support holding above VWAP pivot (${ctx.vwap:.2f})",
@@ -180,7 +229,7 @@ class AutonomousIntradayAgent:
 
             if can_enter and ctx.odds_score >= 50.0:
                 return AgentDecision(
-                    action="BUY",
+                    action=plan.action,
                     ticker=ctx.ticker,
                     risk_profile=profile_to_use,
                     confidence=round(ctx.odds_score / 100.0, 2),
@@ -192,7 +241,12 @@ class AutonomousIntradayAgent:
         # 3. Position is in ENTERED state: Manage Stops, Trailing Exits & Targets
         if ctx.position_status == "ENTERED" and plan:
             # A. Stop Loss Breach Check
-            if price <= plan.stop_loss_price:
+            stop_hit = (
+                price <= plan.stop_loss_price
+                if plan.direction == "LONG"
+                else price >= plan.stop_loss_price
+            )
+            if stop_hit:
                 return AgentDecision(
                     action="STOP_LOSS_EXIT",
                     ticker=ctx.ticker,
@@ -206,7 +260,16 @@ class AutonomousIntradayAgent:
                 )
 
             # B. Target 2 Achievement (Final Take Profit)
-            if plan.target_2_price and price >= plan.target_2_price:
+            target_2_hit = (
+                (
+                    price >= plan.target_2_price
+                    if plan.direction == "LONG"
+                    else price <= plan.target_2_price
+                )
+                if plan.target_2_price
+                else False
+            )
+            if target_2_hit:
                 return AgentDecision(
                     action="TAKE_PROFIT",
                     ticker=ctx.ticker,
@@ -220,7 +283,12 @@ class AutonomousIntradayAgent:
                 )
 
             # C. Target 1 Achievement
-            if price >= plan.target_1_price:
+            target_1_hit = (
+                price >= plan.target_1_price
+                if plan.direction == "LONG"
+                else price <= plan.target_1_price
+            )
+            if target_1_hit:
                 return AgentDecision(
                     action="TAKE_PROFIT",
                     ticker=ctx.ticker,
@@ -235,13 +303,28 @@ class AutonomousIntradayAgent:
 
             # D. Dynamic Trailing Stop Tightening
             # If price reached >= 60% of the distance to Target 1, raise stop to Breakeven
-            distance_to_target = plan.target_1_price - plan.entry_price
-            current_gain = price - plan.entry_price
+            distance_to_target = abs(plan.target_1_price - plan.entry_price)
+            current_gain = (
+                (price - plan.entry_price)
+                if plan.direction == "LONG"
+                else (plan.entry_price - price)
+            )
             if distance_to_target > 0 and (current_gain / distance_to_target) >= 0.60:
                 breakeven_stop = round(
-                    plan.entry_price + (plan.entry_price * 0.002), 2
-                )  # Entry + 0.2% buffer
-                if breakeven_stop > plan.stop_loss_price:
+                    plan.entry_price
+                    + (
+                        plan.entry_price * 0.002
+                        if plan.direction == "LONG"
+                        else -plan.entry_price * 0.002
+                    ),
+                    2,
+                )
+                stop_improves = (
+                    breakeven_stop > plan.stop_loss_price
+                    if plan.direction == "LONG"
+                    else breakeven_stop < plan.stop_loss_price
+                )
+                if stop_improves:
                     return AgentDecision(
                         action="TIGHTEN_STOP",
                         ticker=ctx.ticker,

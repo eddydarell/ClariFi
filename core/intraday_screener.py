@@ -19,8 +19,10 @@ import yfinance as yf
 # Cross-platform color support
 try:
     from colorama import Fore, Style, init
+
     init(autoreset=True)
 except ImportError:
+
     class Fore:
         GREEN = ""
         RED = ""
@@ -29,16 +31,24 @@ except ImportError:
         MAGENTA = ""
         BLUE = ""
         WHITE = ""
+
     class Style:
         RESET_ALL = ""
 
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from market_quote_provider import MarketQuoteProvider
+try:
+    from .market_quote_provider import MarketQuoteProvider
+    from .market_universe import DEFAULT_UNIVERSE as SHARED_DEFAULT_UNIVERSE
+except ImportError:  # Supports direct execution from the core directory.
+    from market_quote_provider import MarketQuoteProvider
+    from market_universe import DEFAULT_UNIVERSE as SHARED_DEFAULT_UNIVERSE
 
 
 @dataclass
 class IntradayCandidate:
     """Scouted stock candidate for intraday trading with calculated metrics."""
+
     ticker: str
     current_price: float
     previous_close: float
@@ -54,6 +64,7 @@ class IntradayCandidate:
     intraday_odds_score: float  # 0 to 100 composite intraday score
     suitable_profiles: List[str]  # e.g., ['HIGH_RISK', 'LOW_RISK']
     reasons: List[str] = field(default_factory=list)
+    data_quality: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -65,193 +76,7 @@ class IntradayScreener:
     daytrading potential (liquidity, volatility, momentum, and catalyst volume).
     """
 
-    DEFAULT_UNIVERSE = [
-        # === ORIGINAL TICKERS ===
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AMD", "AVGO",
-        "CRM", "ADBE", "NFLX", "PLTR", "ORCL", "INTC", "QCOM", "CSCO", "IBM",
-        "SHOP", "UBER", "SPY", "QQQ", "XOM", "CVX", "COP", "SLB", "EOG", "MPC",
-        "V", "MA", "PYPL", "SQ", "NKE", "COST", "HD", "WMT", "PFE", "LLY",
-        "UNH", "JPM", "BAC", "GS", "MS", "C", "SCHW", "AXP", "TFC", "USB",
-        "DIS", "CMCSA", "NEM", "FCX", "CAT", "DE", "HON", "UPS", "LOW", "KHC",
-        "SNOW", "HOOD", "COIN", "RIVN", "LCID", "U", "GME", "AMC", "BB", "RIOT",
-
-        # === RECENT IPOS (2025-2026) ===
-        "CBRS",   # Cerebras Systems - AI chips
-        "CRWV",   # CoreWeave - AI cloud
-        "CRCL",   # Circle Internet - stablecoins
-        "CHYM",   # Chime Financial - digital banking
-        "HNGE",   # Hinge Health - digital MSK care
-        "FIG",    # Figma - design software
-        "KLAR",   # Klarna - BNPL
-        "NTSK",   # Netskope - cloud security
-        "STUB",   # StubHub - ticketing
-        "NAVN",   # Navan - corporate travel
-        "WLTH",   # Wealthfront - robo-advisor
-        "KRMN",   # Karman Holdings - defense
-        "MTSR",   # Metsera - obesity biotech
-        "LGN",    # Legence Corp - energy transition
-        "FIGR",   # Figure Technology - AI finance
-        "LBRX",   # LB Pharmaceuticals
-        "MIAX",   # Miami International Holdings
-        "AMBQ",   # Ambiq Micro - low-power AI chips
-        "BLSH",   # Bullish - crypto exchange
-        "FLY",    # Firefly Aerospace - space
-        "HTFL",   # HeartFlow - AI cardiac
-        "MDLN",   # Medline Inc
-        "VG",     # Venture Global - LNG
-        "SFD",    # Smithfield Foods
-
-        # === LESSER-KNOWN / SMALL CAP GROWTH ===
-        "BFLY",   # Butterfly Network - AI ultrasound
-        "PGY",    # Pagaya Technologies - AI lending
-        "SOUN",   # SoundHound AI - voice AI
-        "BBAI",   # BigBear.ai - AI defense
-        "AAOI",   # Applied Optoelectronics - data center optics
-        "AXTI",   # AXT - semiconductor materials
-        "WULF",   # TeraWulf - AI data centers
-        "CIFR",   # Cipher Digital - AI infrastructure
-        "INOD",   # Innodata - AI training data
-        "SEZL",   # Sezzle - BNPL
-        "ARG",    # Argan - power infrastructure
-        "BYRN",   # Byrna Technologies - non-lethal defense
-        "TMDX",   # Transmedics - organ transplant tech
-        "POWL",   # Powell Industries - electrical equipment
-        "ACAD",   # Acadia Pharmaceuticals
-        "VITC",   # Vita Coco
-        "AEVA",   # Aeva Technologies - 4D LiDAR
-        "NUVB",   # Nuvation Bio - oncology
-        "TOI",    # Oncology Institute - cancer care
-        "SOPH",   # SOPHiA GENETICS - genomic AI
-        "ERAS",   # Erasca - precision oncology
-        "PRAX",   # Praxis Precision Medicines
-
-        # === MISSING BLUE CHIPS ===
-        "GOOG",   # Alphabet Class C
-        "BRK.B",  # Berkshire Hathaway
-        "JNJ",    # Johnson & Johnson
-        "TSM",    # Taiwan Semiconductor
-        "ASML",   # ASML Holding
-        "TXN",    # Texas Instruments
-        "LRCX",   # Lam Research
-        "KLAC",   # KLA Corp
-        "MRVL",   # Marvell
-        "MCHP",   # Microchip
-        "NXPI",   # NXP Semiconductors
-        "MSTR",   # MicroStrategy
-
-        # === MISSING SOFTWARE / CLOUD ===
-        "RBLX",   # Roblox
-        "DASH",   # DoorDash
-        "ABNB",   # Airbnb
-        "DDOG",   # Datadog
-        "NET",    # Cloudflare
-        "CRWD",   # CrowdStrike
-        "PANW",   # Palo Alto Networks
-        "ZS",     # Zscaler
-        "S",      # SentinelOne
-        "MDB",    # MongoDB
-        "NOW",    # ServiceNow
-        "VEEV",   # Veeva Systems
-        "ZM",     # Zoom
-        "DOCU",   # DocuSign
-        "LYFT",   # Lyft
-
-        # === MISSING AEROSPACE & DEFENSE ===
-        "RTX",    # RTX Corporation
-        "LMT",    # Lockheed Martin
-        "NOC",    # Northrop Grumman
-        "GD",     # General Dynamics
-        "BA",     # Boeing
-        "GE",     # GE Aerospace
-        "HWM",    # Howmet Aerospace
-        "TDG",    # TransDigm
-        "AXON",   # Axon Enterprise
-
-        # === MISSING ENERGY & UTILITIES ===
-        "OXY",    # Occidental Petroleum
-        "DVN",    # Devon Energy
-        "FANG",   # Diamondback Energy
-        "EQT",    # EQT Corporation
-        "WMB",    # Williams Companies
-        "KMI",    # Kinder Morgan
-        "ENB",    # Enbridge
-        "LNG",    # Cheniere Energy
-        "VST",    # Vistra Corp (nuclear)
-        "CEG",    # Constellation Energy
-        "NRG",    # NRG Energy
-        "NEE",    # NextEra Energy
-        "DUK",    # Duke Energy
-        "SO",     # Southern Company
-        "ENPH",   # Enphase Energy
-        "FSLR",   # First Solar
-
-        # === MISSING REITS & INFRASTRUCTURE ===
-        "O",      # Realty Income
-        "VICI",   # VICI Properties
-        "SPG",    # Simon Property Group
-        "PLD",    # Prologis
-        "AMT",    # American Tower
-        "EQIX",   # Equinix
-        "DLR",    # Digital Realty
-        "WELL",   # Welltower
-
-        # === MISSING HEALTHCARE & MEDTECH ===
-        "HCA",    # HCA Healthcare
-        "DHR",    # Danaher
-        "ABT",    # Abbott
-        "SYK",    # Stryker
-        "ISRG",   # Intuitive Surgical
-        "TMO",    # Thermo Fisher
-        "REGN",   # Regeneron
-        "VRTX",   # Vertex
-        "AMGN",   # Amgen
-        "GILD",   # Gilead
-        "MRNA",   # Moderna
-        "DXCM",   # Dexcom
-        "EW",     # Edwards Lifesciences
-        "BSX",    # Boston Scientific
-
-        # === MISSING CONSUMER & RETAIL ===
-        "PEP",    # PepsiCo
-        "KO",     # Coca-Cola
-        "PG",     # Procter & Gamble
-        "MCD",    # McDonald's
-        "SBUX",   # Starbucks
-        "CMG",    # Chipotle
-        "MNST",   # Monster Beverage
-        "CELH",   # Celsius Holdings
-
-        # === MISSING E-COMMERCE & INTERNATIONAL ===
-        "TTD",    # Trade Desk
-        "APP",    # AppLovin
-        "ROKU",   # Roku
-        "SNAP",   # Snap
-        "PINS",   # Pinterest
-        "ETSY",   # Etsy
-        "SE",     # Sea Limited
-        "MELI",   # MercadoLibre
-        "BABA",   # Alibaba
-        "PDD",    # PDD Holdings
-
-        # === MISSING AUTO & MANUFACTURING ===
-        "TM",     # Toyota
-        "STLA",   # Stellantis
-        "F",      # Ford
-        "GM",     # General Motors
-        "DELL",   # Dell Technologies
-        "HPE",    # HPE
-
-        # === MISSING MATERIALS & INDUSTRIALS ===
-        "NUE",    # Nucor
-        "ALB",    # Albemarle
-        "MOS",    # Mosaic
-        "ADM",    # Archer Daniels Midland
-
-        # === MISSING TELECOM ===
-        "VZ",     # Verizon
-        "T",      # AT&T
-        "TMUS",   # T-Mobile
-    ]
+    DEFAULT_UNIVERSE = list(SHARED_DEFAULT_UNIVERSE)
 
     def __init__(self, quote_provider: Optional[MarketQuoteProvider] = None):
         self.quote_provider = quote_provider or MarketQuoteProvider()
@@ -283,11 +108,11 @@ class IntradayScreener:
 
         # Clean daily headers
         cols = {c.lower(): c for c in df_daily.columns}
-        high_col = cols.get('high', 'High')
-        low_col = cols.get('low', 'Low')
-        close_col = cols.get('close', 'Close')
-        open_col = cols.get('open', 'Open')
-        vol_col = cols.get('volume', 'Volume')
+        high_col = cols.get("high", "High")
+        low_col = cols.get("low", "Low")
+        close_col = cols.get("close", "Close")
+        open_col = cols.get("open", "Open")
+        vol_col = cols.get("volume", "Volume")
 
         # Compute ATR (14 period)
         highs = df_daily[high_col].values
@@ -300,39 +125,95 @@ class IntradayScreener:
             tr = max(
                 highs[i] - lows[i],
                 abs(highs[i] - closes[i - 1]),
-                abs(lows[i] - closes[i - 1])
+                abs(lows[i] - closes[i - 1]),
             )
             tr_list.append(tr)
 
-        atr = float(np.mean(tr_list[-14:])) if len(tr_list) >= 14 else float(np.mean(tr_list))
-        avg_volume = int(np.mean(volumes[-20:])) if len(volumes) >= 20 else int(np.mean(volumes))
+        atr = (
+            float(np.mean(tr_list[-14:]))
+            if len(tr_list) >= 14
+            else float(np.mean(tr_list))
+        )
+        avg_volume = (
+            int(np.mean(volumes[-20:])) if len(volumes) >= 20 else int(np.mean(volumes))
+        )
         prev_close = float(closes[-2]) if len(closes) >= 2 else float(closes[-1])
 
+        data_quality: List[str] = []
+        intraday_volume = None
+        intraday_frame = None
+        if df_intraday is not None and not df_intraday.empty:
+            intraday_frame = df_intraday.copy()
+            intraday_frame.columns = [
+                str(column).lower() for column in intraday_frame.columns
+            ]
+            required_intraday = {"high", "low", "close", "volume"}
+            if not required_intraday.issubset(intraday_frame.columns):
+                intraday_frame = None
+                data_quality.append("intraday_columns_incomplete")
+
         # Current Price & Open
+        quote = realtime_quote or self.quote_provider.get_quote(ticker)
+        if quote.get("previous_close"):
+            prev_close = float(quote["previous_close"])
         if realtime_quote and realtime_quote.get("price") is not None:
             current_price = float(realtime_quote["price"])
+        elif quote.get("price") is not None:
+            current_price = float(quote["price"])
         else:
-            quote = self.quote_provider.get_quote(ticker)
-            current_price = float(quote.get("price") or closes[-1])
+            current_price = float(closes[-1])
+            data_quality.append("stale_price_fallback")
 
         # Fallback open price
-        open_price = float(df_daily[open_col].iloc[-1]) if open_col in df_daily.columns else prev_close
+        open_price = (
+            float(df_daily[open_col].iloc[-1])
+            if open_col in df_daily.columns
+            else prev_close
+        )
         current_volume = int(volumes[-1]) if len(volumes) > 0 else avg_volume
 
+        if intraday_frame is not None:
+            current_price = (
+                float(intraday_frame["close"].iloc[-1])
+                if not realtime_quote
+                else current_price
+            )
+            open_price = (
+                float(intraday_frame["open"].iloc[0])
+                if "open" in intraday_frame
+                else open_price
+            )
+            intraday_volume = float(intraday_frame["volume"].fillna(0).sum())
+            current_volume = int(intraday_volume)
+            data_quality.append("intraday_snapshot")
+        else:
+            data_quality.append("daily_bar_approximation")
+
         # RVOL calculation (Current volume relative to expected proportion or full daily)
-        rvol = (current_volume / avg_volume) if avg_volume > 0 else 1.0
+        if intraday_frame is not None and avg_volume > 0:
+            last_timestamp = pd.Timestamp(intraday_frame.index[-1])
+            minutes = last_timestamp.hour * 60 + last_timestamp.minute - (9 * 60 + 30)
+            session_fraction = max(0.05, min(1.0, minutes / 390.0))
+            expected_volume = avg_volume * session_fraction
+            rvol = current_volume / expected_volume if expected_volume > 0 else 1.0
+        else:
+            rvol = (current_volume / avg_volume) if avg_volume > 0 else 1.0
 
         # Gap calculation
-        gap_pct = ((open_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
+        gap_pct = (
+            ((open_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
+        )
 
         # Intraday VWAP estimation
-        vwap = (highs[-1] + lows[-1] + closes[-1]) / 3 if len(highs) > 0 else current_price
-        if df_intraday is not None and not df_intraday.empty:
+        vwap = (
+            (highs[-1] + lows[-1] + closes[-1]) / 3 if len(highs) > 0 else current_price
+        )
+        if intraday_frame is not None:
             try:
-                i_high = df_intraday[cols.get('high', 'High')]
-                i_low = df_intraday[cols.get('low', 'Low')]
-                i_close = df_intraday[cols.get('close', 'Close')]
-                i_vol = df_intraday[cols.get('volume', 'Volume')]
+                i_high = intraday_frame["high"]
+                i_low = intraday_frame["low"]
+                i_close = intraday_frame["close"]
+                i_vol = intraday_frame["volume"].fillna(0)
                 typical_price = (i_high + i_low + i_close) / 3
                 cum_vol = i_vol.cumsum()
                 cum_pv = (typical_price * i_vol).cumsum()
@@ -372,33 +253,43 @@ class IntradayScreener:
             reasons.append(f"Ideal daytrading range (ATR: ${atr:.2f}, {atr_pct:.1f}%)")
         elif atr_pct > 6.0:
             score += 20
-            reasons.append(f"Very high intraday volatility (ATR: ${atr:.2f}, {atr_pct:.1f}%)")
+            reasons.append(
+                f"Very high intraday volatility (ATR: ${atr:.2f}, {atr_pct:.1f}%)"
+            )
         elif atr_pct >= 1.0:
             score += 15
-            reasons.append(f"Moderate range suitable for conservative scalps (ATR%: {atr_pct:.1f}%)")
+            reasons.append(
+                f"Moderate range suitable for conservative scalps (ATR%: {atr_pct:.1f}%)"
+            )
         else:
             score += 5
             reasons.append(f"Low volatility range (ATR%: {atr_pct:.1f}%)")
 
         # Gap % scoring
         abs_gap = abs(gap_pct)
-        if 1.0 <= abs_gap <= 5.0:
+        if gap_pct > 1.0 and gap_pct <= 5.0:
             score += 25
-            direction = "Up" if gap_pct > 0 else "Down"
-            reasons.append(f"Morning Catalyst Gap {direction} ({gap_pct:+.2f}%)")
+            reasons.append(f"Bullish morning catalyst gap ({gap_pct:+.2f}%)")
+        elif gap_pct < -1.0:
+            score += 5
+            reasons.append(f"Bearish gap excluded from long momentum ({gap_pct:+.2f}%)")
         elif abs_gap > 5.0:
-            score += 18
-            reasons.append(f"Large gap subject to mean-reversion risk ({gap_pct:+.2f}%)")
+            score += 8
+            reasons.append(f"Extreme gap requires confirmation ({gap_pct:+.2f}%)")
         else:
             score += 10
 
         # VWAP Alignment scoring
         if 0.1 <= vwap_distance_pct <= 2.0:
             score += 20
-            reasons.append(f"Holding clean bullish posture above VWAP (+{vwap_distance_pct:.2f}%)")
+            reasons.append(
+                f"Holding clean bullish posture above VWAP (+{vwap_distance_pct:.2f}%)"
+            )
         elif -1.5 <= vwap_distance_pct < 0.1:
             score += 15
-            reasons.append(f"Near VWAP pivot support/resistance ({vwap_distance_pct:+.2f}%)")
+            reasons.append(
+                f"Near VWAP pivot support/resistance ({vwap_distance_pct:+.2f}%)"
+            )
         else:
             score += 8
 
@@ -428,14 +319,15 @@ class IntradayScreener:
             vwap_distance_pct=round(vwap_distance_pct, 2),
             intraday_odds_score=intraday_score,
             suitable_profiles=profiles,
-            reasons=reasons
+            reasons=reasons,
+            data_quality=data_quality,
         )
 
     def scout_market(
         self,
         tickers: Optional[List[str]] = None,
         top_n: int = 10,
-        min_score: float = 40.0
+        min_score: float = 40.0,
     ) -> List[IntradayCandidate]:
         """
         Scouts and ranks the best intraday stocks from the target watchlist/universe.
@@ -443,7 +335,9 @@ class IntradayScreener:
         universe = [t.upper() for t in (tickers or self.DEFAULT_UNIVERSE)]
         candidates: List[IntradayCandidate] = []
 
-        print(f"{Fore.CYAN}🔎 Scouting {len(universe)} stocks for intraday opportunities...{Style.RESET_ALL}")
+        print(
+            f"{Fore.CYAN}🔎 Scouting {len(universe)} stocks for intraday opportunities...{Style.RESET_ALL}"
+        )
 
         for ticker in universe:
             try:

@@ -11,7 +11,7 @@ import asyncio
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -150,7 +150,7 @@ class IntradayLoopMonitor:
         """Adds a list of tickers to the continuous monitoring loop."""
         market = self._market_state()
         self.market_state = market
-        tradable = market.get("tradable", True)
+        tradable = market.get("tradable", False)
         if not tradable:
             print(
                 f"{Fore.YELLOW}⚠️  {market.get('label', 'MARKET CLOSED')} — "
@@ -183,26 +183,6 @@ class IntradayLoopMonitor:
                 lowest_price=report.current_price,
                 active_plan=plan,
             )
-
-            # Auto-open shadow trade if enabled and initially triggered AND the
-            # market is in the regular session (no entries on closed markets).
-            if self.enable_shadow and plan and tradable:
-                state.shadow_trade = self.simulator.open_paper_trade(plan)
-                if state.shadow_trade:
-                    state.state = "ENTERED"
-                    state.entry_price = report.current_price
-                    self._emit(
-                        EVENT_TRADE_OPENED,
-                        {
-                            "ticker": ticker,
-                            "price": report.current_price,
-                            "risk_profile": plan.risk_profile,
-                            "confidence": 1.0,
-                            "shares": state.shadow_trade.shares,
-                            "cost_basis": state.shadow_trade.cost_basis,
-                            "plan": plan.to_dict(),
-                        },
-                    )
 
             self.monitored_stocks[ticker] = state
             if self.ws_client:
@@ -249,12 +229,31 @@ class IntradayLoopMonitor:
                 }
         return {
             "available": False,
-            "session": "regular",
+            "session": None,
             "is_open": None,
             "holiday": None,
-            "tradable": True,
-            "label": "MARKET OPEN (provider unavailable — assumed)",
+            "tradable": False,
+            "label": "MARKET STATUS UNKNOWN — entries blocked",
         }
+
+    @staticmethod
+    def _rebase_plan(plan: IntradayTradePlan, fill_price: float) -> IntradayTradePlan:
+        """Re-anchor all long-plan levels to the actual simulated fill."""
+        offset = fill_price - plan.entry_price
+        return replace(
+            plan,
+            entry_price=round(fill_price, 2),
+            stop_loss_price=round(plan.stop_loss_price + offset, 2),
+            target_1_price=round(plan.target_1_price + offset, 2),
+            target_2_price=round(plan.target_2_price + offset, 2)
+            if plan.target_2_price
+            else None,
+            trailing_stop_activation_price=(
+                round(plan.trailing_stop_activation_price + offset, 2)
+                if plan.trailing_stop_activation_price
+                else None
+            ),
+        )
 
     def _flatten_open_positions(
         self, reason: str, market: Dict[str, Any]
@@ -271,7 +270,11 @@ class IntradayLoopMonitor:
             price = state.current_price
             unrealized_pnl = 0.0
             if state.entry_price > 0:
-                unrealized_pnl = ((price - state.entry_price) / state.entry_price) * 100
+                direction = state.active_plan.direction if state.active_plan else "LONG"
+                multiplier = 1 if direction == "LONG" else -1
+                unrealized_pnl = (
+                    multiplier * ((price - state.entry_price) / state.entry_price) * 100
+                )
             state.state = "EOD_CLOSED"
             if (
                 self.enable_shadow
@@ -394,7 +397,11 @@ class IntradayLoopMonitor:
             # Running P&L
             unrealized_pnl = 0.0
             if state.entry_price > 0:
-                unrealized_pnl = ((price - state.entry_price) / state.entry_price) * 100
+                direction = state.active_plan.direction if state.active_plan else "LONG"
+                multiplier = 1 if direction == "LONG" else -1
+                unrealized_pnl = (
+                    multiplier * ((price - state.entry_price) / state.entry_price) * 100
+                )
 
             cand = state.report.candidate_summary
             vwap = cand.get("vwap", price)
@@ -430,30 +437,37 @@ class IntradayLoopMonitor:
 
             # 3. Handle Agent Actions
             if (
-                decision.action == "BUY"
+                decision.action in ("BUY", "SELL")
                 and state.state == "WATCHING"
                 and state.active_plan
             ):
-                state.state = "ENTERED"
-                state.entry_price = price
+                execution_plan = self._rebase_plan(state.active_plan, price)
+                shadow_trade = None
                 if self.enable_shadow:
                     shadow_trade = self.simulator.open_paper_trade(
-                        state.active_plan, fill_price=price
+                        execution_plan, fill_price=price
                     )
-                    if shadow_trade:
-                        state.shadow_trade = shadow_trade
-                        self._emit(
-                            EVENT_TRADE_OPENED,
-                            {
-                                "ticker": ticker,
-                                "price": price,
-                                "risk_profile": decision.risk_profile,
-                                "confidence": decision.confidence,
-                                "shares": shadow_trade.shares,
-                                "cost_basis": shadow_trade.cost_basis,
-                                "plan": state.active_plan.to_dict(),
-                            },
+                    if not shadow_trade:
+                        state.messages.append(
+                            f"[{now_str}] Entry rejected: insufficient paper buying power"
                         )
+                        continue
+                state.active_plan = execution_plan
+                state.shadow_trade = shadow_trade
+                state.state = "ENTERED"
+                state.entry_price = price
+                self._emit(
+                    EVENT_TRADE_OPENED,
+                    {
+                        "ticker": ticker,
+                        "price": price,
+                        "risk_profile": decision.risk_profile,
+                        "confidence": decision.confidence,
+                        "shares": shadow_trade.shares if shadow_trade else None,
+                        "cost_basis": shadow_trade.cost_basis if shadow_trade else None,
+                        "plan": execution_plan.to_dict(),
+                    },
+                )
                 msg = f"[{now_str}] 🤖 AGENT BUY: Entered {ticker} at ${price:.2f} ({decision.reasoning[0] if decision.reasoning else ''})"
                 state.messages.append(msg)
                 events.append(
