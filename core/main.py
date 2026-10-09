@@ -9,6 +9,7 @@ event correlation, options analysis, and investment suggestions.
 """
 
 import argparse
+import json
 import os
 import sys
 import calendar
@@ -68,6 +69,14 @@ try:
     from strategy_analyzer import StrategyAnalyzer
     from prediction_tracker import PredictionTracker
     from ticker_suggestion_engine import TickerSuggestionEngine
+    from momentum_strategy import (
+        MomentumConfig,
+        backtest as run_momentum_backtest,
+        compute_signals,
+        result_dict as momentum_result_dict,
+        signal_dict as momentum_signal_dict,
+        build_target_portfolio,
+    )
 
     # Import ML analyzer with fallback
     try:
@@ -3536,6 +3545,32 @@ def main():
         help="Find optimal buy/sell moment based on all analysis data",
     )
 
+    momentum_parser = subparsers.add_parser(
+        "momentum", help="Run quantitative cross-sectional momentum research"
+    )
+    momentum_parser.add_argument(
+        "tickers",
+        nargs="*",
+        help="Optional tickers; defaults to the canonical universe",
+    )
+    momentum_parser.add_argument(
+        "--period", "-p", default="5y", help="Historical period (default: 5y)"
+    )
+    momentum_parser.add_argument(
+        "--no-backtest",
+        action="store_true",
+        help="Only compute current signals and target weights",
+    )
+    momentum_parser.add_argument(
+        "--max-positions", type=int, default=20, help="Maximum portfolio positions"
+    )
+    momentum_parser.add_argument(
+        "--one-way-cost-bps",
+        type=float,
+        default=10.0,
+        help="Estimated one-way transaction cost",
+    )
+
     suggest_parser = subparsers.add_parser(
         "suggest",
         help="📈 Suggest short-term ticker candidates using free market signals",
@@ -5001,6 +5036,56 @@ def main():
                 "⚠️  DISCLAIMER: This is not financial advice. Always do your own research."
             )
             print("=" * 70)
+
+        elif args.command == "momentum":
+            tickers = [
+                ticker.strip().upper()
+                for ticker in (args.tickers or TickerSuggestionEngine.DEFAULT_UNIVERSE)
+                if ticker.strip()
+            ]
+            config = MomentumConfig(
+                maximum_positions=args.max_positions,
+                one_way_cost_bps=args.one_way_cost_bps,
+            )
+            frames = {}
+            errors = {}
+            for ticker in tickers:
+                data = analysis.downloader.download_stock_data(
+                    ticker, period=args.period
+                )
+                if data is None or data.empty:
+                    errors[ticker] = "no_market_data"
+                else:
+                    frames[ticker] = data
+            benchmark = frames.get(config.benchmark)
+            if benchmark is None:
+                benchmark = analysis.downloader.download_stock_data(
+                    config.benchmark, period=args.period
+                )
+                if benchmark is not None and not benchmark.empty:
+                    frames[config.benchmark] = benchmark
+            if benchmark is None or benchmark.empty:
+                result = {
+                    "success": False,
+                    "status": "error",
+                    "errors": {**errors, config.benchmark: "benchmark_unavailable"},
+                }
+            else:
+                signals = compute_signals(frames, config=config)
+                target = build_target_portfolio(signals, benchmark, config=config)
+                result = {
+                    "success": True,
+                    "status": "partial" if errors else "ok",
+                    "strategy_id": "cross_sectional_momentum_12_1_v1",
+                    "signals": [momentum_signal_dict(signal) for signal in signals],
+                    "target_portfolio": target,
+                    "errors": errors,
+                }
+                if not args.no_backtest:
+                    result["backtest"] = momentum_result_dict(
+                        run_momentum_backtest(frames, benchmark, config)
+                    )
+            print(json.dumps(result, indent=2, default=str))
 
         elif args.command == "suggest":
             from database.models import DatabaseManager, SuggestionCache

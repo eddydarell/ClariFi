@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from datetime import datetime, time as dtime
 from typing import Any, Dict, List, Optional
 import pandas as pd
@@ -21,6 +21,7 @@ from intraday_screener import IntradayCandidate, IntradayScreener
 @dataclass
 class IntradayTradePlan:
     """Intraday trade plan containing entry, target, stop loss, and exit timing."""
+
     risk_profile: str  # 'HIGH_RISK' or 'LOW_RISK'
     ticker: str
     action: str  # 'BUY' or 'HOLD'
@@ -41,6 +42,7 @@ class IntradayTradePlan:
     position_sizing_pct: float  # Recommended portfolio allocation %
     reasons: List[str] = field(default_factory=list)
     valid: bool = True
+    direction: str = "LONG"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -49,6 +51,7 @@ class IntradayTradePlan:
 @dataclass
 class DualIntradayReport:
     """Container holding both High-Risk and Low-Risk intraday strategies for a ticker."""
+
     ticker: str
     current_price: float
     intraday_odds_score: float
@@ -59,13 +62,13 @@ class DualIntradayReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'ticker': self.ticker,
-            'current_price': self.current_price,
-            'intraday_odds_score': self.intraday_odds_score,
-            'timestamp': self.timestamp,
-            'high_risk_strategy': self.high_risk_strategy.to_dict(),
-            'low_risk_strategy': self.low_risk_strategy.to_dict(),
-            'candidate_summary': self.candidate_summary,
+            "ticker": self.ticker,
+            "current_price": self.current_price,
+            "intraday_odds_score": self.intraday_odds_score,
+            "timestamp": self.timestamp,
+            "high_risk_strategy": self.high_risk_strategy.to_dict(),
+            "low_risk_strategy": self.low_risk_strategy.to_dict(),
+            "candidate_summary": self.candidate_summary,
         }
 
 
@@ -80,14 +83,16 @@ class IntradayStrategyGenerator:
         self.screener = screener or IntradayScreener()
 
     def generate_strategies_for_candidate(
-        self,
-        candidate: IntradayCandidate
+        self, candidate: IntradayCandidate
     ) -> DualIntradayReport:
         """
         Generates both High Risk and Low Risk trade plans for a screened candidate.
         """
         high_risk_plan = self._build_high_risk_strategy(candidate)
         low_risk_plan = self._build_low_risk_strategy(candidate)
+
+        high_risk_plan = self._orient_plan(high_risk_plan, candidate)
+        low_risk_plan = self._orient_plan(low_risk_plan, candidate)
 
         return DualIntradayReport(
             ticker=candidate.ticker,
@@ -96,7 +101,43 @@ class IntradayStrategyGenerator:
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             high_risk_strategy=high_risk_plan,
             low_risk_strategy=low_risk_plan,
-            candidate_summary=candidate.to_dict()
+            candidate_summary=candidate.to_dict(),
+        )
+
+    def _orient_plan(
+        self, plan: IntradayTradePlan, candidate: IntradayCandidate
+    ) -> IntradayTradePlan:
+        """Use a short thesis only when both gap and VWAP posture are bearish."""
+        if candidate.gap_pct >= -1.0 or candidate.vwap_distance_pct >= 0:
+            return plan
+        entry = plan.entry_price
+        stop = round(entry + (entry - plan.stop_loss_price), 2)
+        target_1 = round(entry - (plan.target_1_price - entry), 2)
+        target_2 = (
+            round(entry - (plan.target_2_price - entry), 2)
+            if plan.target_2_price
+            else None
+        )
+        trailing = (
+            round(entry - (plan.trailing_stop_activation_price - entry), 2)
+            if plan.trailing_stop_activation_price
+            else None
+        )
+        return replace(
+            plan,
+            action="SELL",
+            direction="SHORT",
+            stop_loss_price=stop,
+            target_1_price=target_1,
+            target_2_price=target_2,
+            trailing_stop_activation_price=trailing,
+            entry_condition=plan.entry_condition.replace("above", "below").replace(
+                "Support", "Resistance"
+            ),
+            reasons=[
+                *plan.reasons,
+                "Short direction confirmed by bearish gap and price below VWAP",
+            ],
         )
 
     def generate_for_ticker(self, ticker: str) -> Optional[DualIntradayReport]:
@@ -135,13 +176,15 @@ class IntradayStrategyGenerator:
 
         risk_per_share = round(entry_price - stop_loss_price, 2)
         reward_per_share = round(target_1_price - entry_price, 2)
-        rr_ratio = round(reward_per_share / risk_per_share, 2) if risk_per_share > 0 else 2.0
+        rr_ratio = (
+            round(reward_per_share / risk_per_share, 2) if risk_per_share > 0 else 2.0
+        )
 
         reasons = [
             f"Momentum breakout play with high RVOL ({c.rvol:.2f}x)",
             f"Wide ATR profit expansion target (+{target_1_pct:.1f}% / +{target_2_pct:.1f}%)",
             f"Stop-loss placed 1x ATR (${stop_distance:.2f}) below entry",
-            "Trailing stop engages once Target 1 or +1.2x ATR is printed"
+            "Trailing stop engages once Target 1 or +1.2x ATR is printed",
         ]
 
         return IntradayTradePlan(
@@ -164,7 +207,7 @@ class IntradayStrategyGenerator:
             risk_reward_ratio=rr_ratio,
             position_sizing_pct=5.0,  # 5% max risk allocation
             reasons=reasons,
-            valid=True
+            valid=True,
         )
 
     def _build_low_risk_strategy(self, c: IntradayCandidate) -> IntradayTradePlan:
@@ -194,13 +237,15 @@ class IntradayStrategyGenerator:
 
         risk_per_share = round(entry_price - stop_loss_price, 2)
         reward_per_share = round(target_1_price - entry_price, 2)
-        rr_ratio = round(reward_per_share / risk_per_share, 2) if risk_per_share > 0 else 1.6
+        rr_ratio = (
+            round(reward_per_share / risk_per_share, 2) if risk_per_share > 0 else 1.6
+        )
 
         reasons = [
             f"Mean reversion / trend continuation near VWAP (${c.vwap:.2f})",
             f"Controlled risk with tight stop at 0.6x ATR (-{stop_loss_pct:.1f}%)",
             f"High-probability conservative target (+{target_1_pct:.1f}%)",
-            "Liquid profile ensuring minimal slippage"
+            "Liquid profile ensuring minimal slippage",
         ]
 
         return IntradayTradePlan(
@@ -209,7 +254,7 @@ class IntradayStrategyGenerator:
             action="BUY",
             entry_price=entry_price,
             entry_window="09:45 - 11:30 EST (Morning VWAP / EMA Pullback Confirmation)",
-            entry_condition=f"Support hold at or above VWAP (${c.vwap:.2f}) with RSI > 45",
+            entry_condition=f"Support hold at or above VWAP (${c.vwap:.2f}) with positive price posture",
             stop_loss_price=stop_loss_price,
             stop_loss_pct=stop_loss_pct,
             target_1_price=target_1_price,
@@ -223,5 +268,5 @@ class IntradayStrategyGenerator:
             risk_reward_ratio=rr_ratio,
             position_sizing_pct=10.0,  # 10% allocation for conservative profile
             reasons=reasons,
-            valid=True
+            valid=True,
         )
